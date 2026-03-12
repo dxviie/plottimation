@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plottimation Web Tool</title>
+    <link rel="stylesheet" href="style.css" />
+    <script src="opencv.js"></script>
+    <script src="gif.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="control-panel">
+        <div class="panel-head">
+          <p class="eyebrow">Desktop Tool</p>
+          <h1>Plottimation</h1>
+          <p class="lede">
+            Build an animated GIF from a photographed plotted frame-sheet.
+          </p>
+        </div>
+
+        <section class="control-group">
+          <h2>Photo</h2>
+          <label id="dropZone" class="drop-zone" for="fileInput">
+            <span>Drop a photo here</span>
+            <span>or click to choose a file</span>
+          </label>
+          <input id="fileInput" type="file" accept="image/*" />
+          <div class="control-row">
+            <button id="processButton" type="button">Process Photo</button>
+            <button id="exportButton" type="button" disabled>Export GIF</button>
+          </div>
+          <a id="downloadLink" class="download-link hidden" download="plottimation.gif">Download GIF</a>
+        </section>
+
+        <section class="control-group">
+          <h2>Layout</h2>
+          <div class="field-grid">
+            <label>
+              <span>Sheet Width</span>
+              <input id="paperWidth" type="number" min="1" step="0.1" value="11" />
+            </label>
+            <label>
+              <span>Sheet Height</span>
+              <input id="paperHeight" type="number" min="1" step="0.1" value="8.5" />
+            </label>
+            <label>
+              <span>Frame Columns</span>
+              <input id="frameCols" type="number" min="1" step="1" value="5" />
+            </label>
+            <label>
+              <span>Frame Rows</span>
+              <input id="frameRows" type="number" min="1" step="1" value="4" />
+            </label>
+          </div>
+        </section>
+
+        <section class="control-group">
+          <h2>Alignment</h2>
+          <label class="toggle">
+            <input id="useCrossAlignment" type="checkbox" checked />
+            <span>Use cross-based subpixel alignment</span>
+          </label>
+          <label class="toggle">
+            <input id="showDebug" type="checkbox" />
+            <span>Show cross-alignment debug overlay</span>
+          </label>
+        </section>
+
+        <section class="control-group">
+          <h2>Trim Output</h2>
+          <div class="field-grid">
+            <label>
+              <span>Crop Left</span>
+              <input id="cropLeft" type="number" min="0" step="1" value="0" />
+            </label>
+            <label>
+              <span>Crop Right</span>
+              <input id="cropRight" type="number" min="0" step="1" value="0" />
+            </label>
+            <label>
+              <span>Crop Top</span>
+              <input id="cropTop" type="number" min="0" step="1" value="0" />
+            </label>
+            <label>
+              <span>Crop Bottom</span>
+              <input id="cropBottom" type="number" min="0" step="1" value="0" />
+            </label>
+          </div>
+        </section>
+
+        <section class="control-group">
+          <h2>Appearance</h2>
+          <div class="slider-stack">
+            <label>
+              <span>Brightness <output id="brightnessValue">+0</output></span>
+              <input id="brightness" type="range" min="-100" max="100" step="1" value="0" />
+            </label>
+            <label>
+              <span>Contrast <output id="contrastValue">+0</output></span>
+              <input id="contrast" type="range" min="-100" max="100" step="1" value="0" />
+            </label>
+            <label>
+              <span>Saturation <output id="saturationValue">+0</output></span>
+              <input id="saturation" type="range" min="-100" max="100" step="1" value="0" />
+            </label>
+          </div>
+        </section>
+
+        <section class="control-group">
+          <h2>Playback</h2>
+          <div class="field-grid">
+            <label>
+              <span>Frame Rate</span>
+              <input id="fps" type="number" min="1" max="60" step="1" value="20" />
+            </label>
+          </div>
+        </section>
+
+        <section class="control-group status-group">
+          <h2>Status</h2>
+          <pre id="statusText">Waiting for OpenCV…</pre>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <section class="viewer-card">
+          <header>
+            <h2>Raw Photo</h2>
+          </header>
+          <canvas id="rawCanvas"></canvas>
+        </section>
+
+        <section class="viewer-card">
+          <header>
+            <h2>Rectified Sheet</h2>
+          </header>
+          <canvas id="rectifiedCanvas"></canvas>
+        </section>
+
+        <section class="viewer-card viewer-card-wide">
+          <header>
+            <h2>Output GIF</h2>
+          </header>
+          <div class="output-preview">
+            <canvas id="gifPreviewCanvas"></canvas>
+            <img id="gifImage" alt="Exported GIF preview" class="hidden" />
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
