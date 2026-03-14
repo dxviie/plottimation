@@ -12,29 +12,23 @@
     <div class="app-shell">
       <aside class="control-panel">
         <div class="panel-head">
-          <p class="eyebrow">Desktop Tool</p>
-          <h1>Plottimation</h1>
+          <h1>Plottimation Tool</h1>
           <p class="lede">
-            Build an animated GIF from a photographed plotted frame-sheet.
+            Build an animated GIF from a photo of a frame-sheet.
           </p>
         </div>
 
         <section class="control-group">
           <h2>Photo</h2>
           <label id="dropZone" class="drop-zone" for="fileInput">
-            <span>Drop a photo here</span>
+            <span>Drop a photo or scan here</span>
             <span>or click to choose a file</span>
           </label>
           <input id="fileInput" type="file" accept="image/*" />
-          <div class="control-row">
-            <button id="processButton" type="button">Process Photo</button>
-            <button id="exportButton" type="button" disabled>Export GIF</button>
-          </div>
-          <a id="downloadLink" class="download-link hidden" download="plottimation.gif">Download GIF</a>
         </section>
 
-        <section class="control-group">
-          <h2>Layout</h2>
+        <details class="control-group collapsible">
+          <summary>Layout</summary>
           <div class="field-grid">
             <label>
               <span>Sheet Width</span>
@@ -53,22 +47,32 @@
               <input id="frameRows" type="number" min="1" step="1" value="4" />
             </label>
           </div>
-        </section>
+        </details>
 
-        <section class="control-group">
-          <h2>Alignment</h2>
+        <details class="control-group collapsible">
+          <summary>Detection</summary>
+          <div class="slider-stack">
+            <label>
+              <span>Cross Region Size <output id="crossRoiScaleValue">25 px</output></span>
+              <input id="crossRoiScale" type="range" min="30" max="150" step="1" value="60" />
+            </label>
+          </div>
+        </details>
+
+        <details class="control-group collapsible">
+          <summary>Alignment</summary>
           <label class="toggle">
             <input id="useCrossAlignment" type="checkbox" checked />
             <span>Use cross-based subpixel alignment</span>
           </label>
           <label class="toggle">
-            <input id="showDebug" type="checkbox" />
-            <span>Show cross-alignment debug overlay</span>
+            <input id="useRectifiedAsSource" type="checkbox" checked />
+            <span>Use rectified as source</span>
           </label>
-        </section>
+        </details>
 
-        <section class="control-group">
-          <h2>Trim Output</h2>
+        <details class="control-group collapsible">
+          <summary>Trim Output</summary>
           <div class="field-grid">
             <label>
               <span>Crop Left</span>
@@ -87,10 +91,10 @@
               <input id="cropBottom" type="number" min="0" step="1" value="0" />
             </label>
           </div>
-        </section>
+        </details>
 
-        <section class="control-group">
-          <h2>Appearance</h2>
+        <details class="control-group collapsible">
+          <summary>Appearance</summary>
           <div class="slider-stack">
             <label>
               <span>Brightness <output id="brightnessValue">+0</output></span>
@@ -105,17 +109,17 @@
               <input id="saturation" type="range" min="-100" max="100" step="1" value="0" />
             </label>
           </div>
-        </section>
+        </details>
 
-        <section class="control-group">
-          <h2>Playback</h2>
+        <details class="control-group collapsible">
+          <summary>Playback</summary>
           <div class="field-grid">
             <label>
               <span>Frame Rate</span>
               <input id="fps" type="number" min="1" max="60" step="1" value="20" />
             </label>
           </div>
-        </section>
+        </details>
 
         <section class="control-group status-group">
           <h2>Status</h2>
@@ -126,25 +130,37 @@
       <main class="workspace">
         <section class="viewer-card">
           <header>
-            <h2>Raw Photo</h2>
+            <h2>Raw Photo <span id="rawPhotoName" class="header-note"></span></h2>
           </header>
-          <canvas id="rawCanvas"></canvas>
+          <div class="viewer-stage">
+            <canvas id="rawCanvas"></canvas>
+          </div>
         </section>
 
         <section class="viewer-card">
           <header>
             <h2>Rectified Sheet</h2>
           </header>
-          <canvas id="rectifiedCanvas"></canvas>
+          <div class="viewer-stage">
+            <canvas id="rectifiedCanvas"></canvas>
+          </div>
         </section>
 
-        <section class="viewer-card viewer-card-wide">
+        <section class="viewer-card">
           <header>
-            <h2>Output GIF</h2>
+            <h2>Cross Regions</h2>
+          </header>
+          <div id="crossRoiGrid" class="cross-roi-grid"></div>
+        </section>
+
+        <section class="viewer-card">
+          <header>
+            <h2>Animation Preview</h2>
+            <button id="exportButton" class="header-button" type="button" disabled>Export GIF</button>
           </header>
           <div class="output-preview">
             <canvas id="gifPreviewCanvas"></canvas>
-            <img id="gifImage" alt="Exported GIF preview" class="hidden" />
+            <img id="gifImage" alt="Exported GIF preview" class="hidden" hidden />
           </div>
         </section>
       </main>
