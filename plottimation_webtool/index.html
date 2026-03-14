@@ -16,10 +16,16 @@
           <p class="lede">
             Build an animated GIF from a photo of a frame-sheet.
           </p>
+          <p class="lede">
+            v.1.0 • Golan Levin, 3/2026
+          </p>
         </div>
 
         <section class="control-group">
-          <h2>Photo</h2>
+          <div class="section-head">
+            <h2>Photo</h2>
+            <button id="loadDemoButton" class="header-button" type="button">Load Demo</button>
+          </div>
           <label id="dropZone" class="drop-zone" for="fileInput">
             <span>Drop a photo or scan here</span>
             <span>or click to choose a file</span>
@@ -31,14 +37,6 @@
           <summary>Layout</summary>
           <div class="field-grid">
             <label>
-              <span>Sheet Width</span>
-              <input id="paperWidth" type="number" min="1" step="0.1" value="11" />
-            </label>
-            <label>
-              <span>Sheet Height</span>
-              <input id="paperHeight" type="number" min="1" step="0.1" value="8.5" />
-            </label>
-            <label>
               <span>Frame Columns</span>
               <input id="frameCols" type="number" min="1" step="1" value="5" />
             </label>
@@ -47,32 +45,99 @@
               <input id="frameRows" type="number" min="1" step="1" value="4" />
             </label>
           </div>
-        </details>
-
-        <details class="control-group collapsible">
-          <summary>Detection</summary>
-          <div class="slider-stack">
+          <label class="stack-label">
+            <span>Paper Size (Landscape)</span>
+            <select id="paperPreset">
+              <option value="letter" selected>Letter (11×8.5 in)</option>
+              <option value="legal">Legal (14×8.5 in)</option>
+              <option value="tabloid">Tabloid (17×11 in)</option>
+              <option value="9x12">9×12 in</option>
+              <option value="18x12">18×12 in</option>
+              <option value="24x18">24×18 in</option>
+              <option value="36x24">36×24 in</option>
+              <option value="a4">A4 (297×210 mm)</option>
+              <option value="a3">A3 (420×297 mm)</option>
+              <option value="a2">A2 (594×420 mm)</option>
+              <option value="a1">A1 (841×594 mm)</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <div id="customPaperFields" class="field-grid" hidden>
             <label>
-              <span>Cross Region Size <output id="crossRoiScaleValue">25 px</output></span>
-              <input id="crossRoiScale" type="range" min="30" max="150" step="1" value="60" />
+              <span>Sheet Width</span>
+              <input id="paperWidth" type="number" min="1" step="0.1" value="11" />
+            </label>
+            <label>
+              <span>Sheet Height</span>
+              <input id="paperHeight" type="number" min="1" step="0.1" value="8.5" />
             </label>
           </div>
         </details>
 
         <details class="control-group collapsible">
-          <summary>Alignment</summary>
+          <summary>Detection &amp; Alignment</summary>
+          <label class="stack-label">
+            <span>Thresholding Method</span>
+            <select id="thresholdMethod">
+              <option value="offset-peak" selected>Offset Peak</option>
+              <option value="otsu">Otsu</option>
+            </select>
+          </label>
+          <div class="slider-stack">
+            <label>
+              <span>Thresholding Offset <output id="thresholdOffsetValue">-20</output></span>
+              <input id="thresholdOffset" type="range" min="-128" max="128" step="1" value="-20" />
+            </label>
+          </div>
+          <div class="slider-stack">
+            <label>
+              <span>Cross Region Size <output id="crossRoiScaleValue">-- px</output></span>
+              <input id="crossRoiScale" type="range" min="30" max="150" step="1" value="60" />
+            </label>
+          </div>
           <label class="toggle">
             <input id="useCrossAlignment" type="checkbox" checked />
             <span>Use cross-based subpixel alignment</span>
           </label>
           <label class="toggle">
-            <input id="useRectifiedAsSource" type="checkbox" checked />
+            <input id="useRectifiedAsSource" type="checkbox" />
             <span>Use rectified as source</span>
           </label>
         </details>
 
         <details class="control-group collapsible">
-          <summary>Trim Output</summary>
+          <summary>
+            <span>Appearance</span>
+            <button id="resetAppearanceButton" class="summary-button" type="button">Reset</button>
+          </summary>
+          <div class="slider-stack">
+            <label>
+              <span>Brightness <output id="brightnessValue">+0</output></span>
+              <input id="brightness" type="range" min="-100" max="100" step="1" value="0" />
+            </label>
+            <label>
+              <span>Contrast <output id="contrastValue">+0</output></span>
+              <input id="contrast" type="range" min="-100" max="100" step="1" value="0" />
+            </label>
+            <label>
+              <span>Vibrance <output id="vibranceValue">+0</output></span>
+              <input id="vibrance" type="range" min="-100" max="100" step="1" value="0" />
+            </label>
+          </div>
+          <label class="stack-label">
+            <span>Resampling</span>
+            <select id="gifResampling">
+              <option value="linear" selected>Linear</option>
+              <option value="cubic">Cubic</option>
+            </select>
+          </label>
+        </details>
+
+        <details class="control-group collapsible">
+          <summary>
+            <span>Trim Output</span>
+            <button id="resetTrimButton" class="summary-button" type="button">Reset</button>
+          </summary>
           <div class="field-grid">
             <label>
               <span>Crop Left</span>
@@ -94,31 +159,32 @@
         </details>
 
         <details class="control-group collapsible">
-          <summary>Appearance</summary>
-          <div class="slider-stack">
-            <label>
-              <span>Brightness <output id="brightnessValue">+0</output></span>
-              <input id="brightness" type="range" min="-100" max="100" step="1" value="0" />
-            </label>
-            <label>
-              <span>Contrast <output id="contrastValue">+0</output></span>
-              <input id="contrast" type="range" min="-100" max="100" step="1" value="0" />
-            </label>
-            <label>
-              <span>Saturation <output id="saturationValue">+0</output></span>
-              <input id="saturation" type="range" min="-100" max="100" step="1" value="0" />
-            </label>
-          </div>
-        </details>
-
-        <details class="control-group collapsible">
-          <summary>Playback</summary>
+          <summary>GIF Export Options</summary>
           <div class="field-grid">
             <label>
               <span>Frame Rate</span>
               <input id="fps" type="number" min="1" max="60" step="1" value="20" />
             </label>
           </div>
+          <div class="slider-stack">
+            <label>
+              <span>Encoding Quality (lower is better) <output id="gifQualityValue">10</output></span>
+              <input id="gifQuality" type="range" min="1" max="20" step="1" value="10" />
+            </label>
+          </div>
+          <label class="stack-label">
+            <span>Dithering</span>
+            <select id="gifDither">
+              <option value="off">Off</option>
+              <option value="FloydSteinberg">Standard (Floyd-Steinberg)</option>
+              <option value="FloydSteinberg-serpentine" selected>Smooth (Floyd-Steinberg Serpentine)</option>
+              <option value="Atkinson">Retro (Atkinson)</option>
+            </select>
+          </label>
+          <label class="toggle">
+            <input id="gifGlobalPalette" type="checkbox" />
+            <span>Use Global Palette</span>
+          </label>
         </details>
 
         <section class="control-group status-group">

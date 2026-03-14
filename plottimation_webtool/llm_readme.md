@@ -2,161 +2,240 @@
 
 ## Purpose
 
-This directory contains a desktop-oriented browser tool for generating an animated GIF from a photograph of a plotted frame-sheet. The frame-sheet is a sheet of paper containing a grid of animation frames plus registration marks. The intended workflow is:
+`plottimation_webtool/` is a browser-based desktop tool for producing an animated GIF from a photograph or scan of a plotted animation frame-sheet.
 
-1. User uploads a phone photo or scan of a plotted frame-sheet.
-2. Tool detects the paper page.
-3. Tool rectifies the page with perspective correction.
-4. Tool finds the four corner registration circles.
-5. Tool performs a second rectification to the dot-defined sheet coordinate system.
-6. Tool optionally detects interior `+` registration marks for subpixel frame alignment.
-7. Tool extracts the individual animation frames.
-8. Tool previews the animation and exports an animated GIF.
+The source sheet contains:
 
-This tool is a friendlier browser-based successor to `plottimation_GIF_generator/`.
+- a regular grid of animation frames
+- 4 corner registration circles
+- interior `+` registration marks
 
-## Important sibling directories
+The tool:
+
+1. loads a photo or scan of the sheet
+2. finds and rectifies the page
+3. finds the corner dots
+4. rectifies to the dot-defined sheet coordinate system
+5. optionally refines frame geometry with the interior `+` marks
+6. previews the animation
+7. exports an animated GIF
+
+This tool is a friendlier successor to `plottimation_GIF_generator/`.
+
+## Related directories
 
 - `grid-animation-svg-generator/`
-  Generates plotted frame-sheets and the registration-mark geometry.
+  Generates plotted frame-sheets and registration graphics.
 - `plottimation_GIF_generator/`
-  Original p5.js/OpenCV sketch that inspired this web tool.
+  Original p5.js/OpenCV sketch that inspired this app.
 - `plottimation_webtool/`
-  Current web app.
+  Current HTML/CSS/JS application.
 
 ## Core design constraints
 
-- The GIF generator should know as little as possible about the sheet design.
-- It should depend only on:
-  - `N_FRAME_COLS`
-  - `N_FRAME_ROWS`
-  - user-entered sheet width/height
-- It should infer the cross lattice from equal spacing in the rectified sheet.
-- It should not depend on exact margins, circle sizes, or other generator-specific geometry.
-- The app is intended for desktop browser use, not mobile.
-- p5.js has been removed from this tool; it is plain HTML/CSS/JS.
+- The GIF tool should know as little as possible about the exact sheet design.
+- It should depend primarily on:
+  - frame columns
+  - frame rows
+  - sheet aspect ratio
+- It should infer the marker lattice from equal spacing over the rectified sheet.
+- It should not depend on exact plot margins, dot sizes, SVG generator constants, etc.
+- Desktop browser only. Mobile is not a target.
+- No p5.js in this tool.
 
 ## Main files
 
 - `plottimation_webtool/index.html`
-  Main UI structure.
+  UI structure.
 - `plottimation_webtool/style.css`
-  Neutral gray visual styling and layout.
+  layout and styling.
 - `plottimation_webtool/app.js`
-  All application logic, CV pipeline, preview rendering, GIF export, drag/drop.
+  app logic, CV pipeline, preview logic, GIF export.
 - `plottimation_webtool/opencv.js`
-  Local OpenCV.js build used by the app.
+  local OpenCV.js runtime.
 - `plottimation_webtool/gif.js`
   GIF encoder library.
+- `plottimation_webtool/demo/mySrcImage.jpg`
+  demo image loaded by the `Load Demo` button.
 
-## UI structure
+## Current UI
 
-### Sidebar controls
+### Header
 
-- Photo
-  - drag/drop zone
-  - file input
-- Layout
-  - sheet width
-  - sheet height
-  - frame columns
-  - frame rows
-- Detection
-  - `Cross Region Size` slider
-- Alignment
-  - `Use cross-based subpixel alignment`
-  - `Use rectified as source`
-- Trim Output
-  - crop left/right/top/bottom
-- Appearance
-  - brightness
-  - contrast
-  - saturation
-- Playback
-  - frame rate
-- Status
-  - multiline diagnostics
+- Title: `Plottimation Tool`
+- Subtitle line 1: `Build an animated GIF from a photo of a frame-sheet.`
+- Subtitle line 2: `v.1.0 • Golan Levin, 3/2026`
 
-### Main workspace panels
+### Sidebar panels
+
+1. `Photo`
+   - drag/drop zone
+   - file picker
+   - skinny `Load Demo` button
+
+2. `Layout`
+   - `Frame Columns`
+   - `Frame Rows`
+   - `Paper Size (Landscape)` preset menu
+   - `Custom` width/height fields only visible when preset is `Custom`
+
+3. `Detection & Alignment`
+   - `Thresholding Method`
+     - `Offset Peak`
+     - `Otsu`
+   - `Thresholding Offset`
+   - `Cross Region Size`
+   - `Use cross-based subpixel alignment`
+   - `Use rectified as source`
+
+4. `Appearance`
+   - skinny `Reset` button in subpanel summary
+   - `Brightness`
+   - `Contrast`
+   - `Vibrance`
+   - `Resampling`
+
+5. `Trim Output`
+   - skinny `Reset` button in subpanel summary
+   - crop left/right/top/bottom
+
+6. `GIF Export Options`
+   - `Frame Rate`
+   - `Encoding Quality (lower is better)`
+   - `Dithering`
+   - `Use Global Palette`
+
+7. `Status`
+   - multiline text diagnostics
+
+### Main viewer panels
 
 - `Raw Photo`
   - shows uploaded image
   - header shows source filename in parentheses
+  - overlays detected page contour in semi-transparent lime
+
 - `Rectified Sheet`
-  - shows final rectified sheet preview
+  - shows the final rectified sheet preview
+
 - `Cross Regions`
-  - shows square ROI patches around expected cross locations
-  - arranged in a `(cols + 1) x (rows + 1)` lattice with dotted placeholders for the missing corner slots
+  - shows ROI tiles around expected interior `+` positions
+  - grid is `(cols + 1) x (rows + 1)` with dotted placeholders for the 4 corner-dot slots
+
 - `Animation Preview`
-  - animated canvas preview
-  - skinny `Export GIF` button in panel header
-  - exported GIF `<img>` stays hidden until export exists
+  - animated preview canvas
+  - skinny `Export GIF` button in header
+  - exported GIF image appears only after export
 
-## Current visual style
+## Visual style
 
-- Neutral gray theme
-- Minimal styling
-- Browser-default font stacks
-- Rounded corners reduced to 3px on normal panels
-- Cross ROI tiles intentionally have no decorative frame/border/radius
+- neutral gray
+- built-in browser fonts
+- minimal styling
+- subtle stripe background in preview stages before any image is loaded
+- plain light gray stage background after an image is loaded
+- collapsible subpanels use large `▶` / `▼` disclosure glyphs
+- `Reset` buttons are normal weight, not bold
 
-## Important current behaviors
+## Important UX behavior
 
-- Processing is automatic after image load or control changes.
-- There is no `Process Photo` button.
-- `Export GIF` lives in the `Animation Preview` header.
-- The exported GIF file name is friendly:
-  - `<sanitized_source_basename>_animation_YYYYMMDD_HHMMSS.gif`
-- Spaces and junk characters are sanitized to underscores or removed.
-- Dragging the displayed GIF out of the browser should use the same friendly filename.
-- Dragging `Raw Photo` or `Rectified Sheet` should use the full-resolution backing canvases, not panel previews.
+- processing is automatic after image load
+- there is no `Process Photo` button
+- any relevant control change revokes and hides any previously exported GIF
+- exported GIF preview should not remain visible if controls change
+- the visible preview canvases are panel-sized previews only, not the data used internally for CV/export
+- dragging `Raw Photo` or `Rectified Sheet` out uses full-resolution backing canvases
+- dragging exported GIF out should preserve the friendly filename
 
-## Current status panel fields
+## Current filename behavior
 
-The status panel currently reports:
+Exported GIF filenames now look like:
+
+- `<sanitized_base>_anim_YYYYMMDD_HHMMSS_q10.gif`
+
+Notes:
+
+- `animation` was shortened to `anim`
+- quality suffix is appended as `_q<quality>`
+- basename is sanitized to remove spaces/junk
+
+## Status panel fields
+
+Currently includes:
 
 - raw photo size
 - paper threshold
-- largest contour area
+- largest contour area as a percentage
 - detection warp size
 - extraction warp size
 - rectified sheet size
 - animation size
 - frame source
 - frames extracted
-- cross-alignment usage/fallback message
+- cross alignment usage/fallback text
 
-## Main application state in `app.js`
+## Main DOM handles in `app.js`
 
-### `dom`
+Important `dom` fields:
 
-Important handles include:
+- upload / demo
+  - `dropZone`
+  - `fileInput`
+  - `loadDemoButton`
 
-- `dropZone`
-- `fileInput`
-- `exportButton`
-- `paperWidth`
-- `paperHeight`
-- `frameCols`
-- `frameRows`
-- `crossRoiScale`
-- `crossRoiScaleValue`
-- `useCrossAlignment`
-- `useRectifiedAsSource`
-- crop inputs
-- appearance sliders and outputs
-- `fps`
-- `statusText`
-- `rawCanvas`
-- `rawPhotoName`
-- `rectifiedCanvas`
-- `gifPreviewCanvas`
-- `gifImage`
-- `crossRoiGrid`
+- layout
+  - `paperPreset`
+  - `customPaperFields`
+  - `paperWidth`
+  - `paperHeight`
+  - `frameCols`
+  - `frameRows`
 
-### `state`
+- detection/alignment
+  - `thresholdMethod`
+  - `thresholdOffset`
+  - `thresholdOffsetValue`
+  - `crossRoiScale`
+  - `crossRoiScaleValue`
+  - `useCrossAlignment`
+  - `useRectifiedAsSource`
 
-Important fields include:
+- appearance
+  - `brightness`
+  - `brightnessValue`
+  - `contrast`
+  - `contrastValue`
+  - `vibrance`
+  - `vibranceValue`
+  - `gifResampling`
+  - `resetAppearanceButton`
+
+- trim
+  - `cropLeft`
+  - `cropRight`
+  - `cropTop`
+  - `cropBottom`
+  - `resetTrimButton`
+
+- gif export
+  - `fps`
+  - `gifQuality`
+  - `gifQualityValue`
+  - `gifDither`
+  - `gifGlobalPalette`
+  - `exportButton`
+
+- viewers
+  - `rawCanvas`
+  - `rawPhotoName`
+  - `rectifiedCanvas`
+  - `gifPreviewCanvas`
+  - `gifImage`
+  - `crossRoiGrid`
+
+## Main state in `app.js`
+
+Important `state` fields:
 
 - `cvReady`
 - `sourceImage`
@@ -164,542 +243,583 @@ Important fields include:
 - `exportedGifFilename`
 - `sourceCanvas`
   - full-resolution uploaded image
-- `adjustedCanvas`
-  - full-resolution appearance-adjusted image
+- `baseRectifiedCanvas`
+  - unadjusted rectified sheet canvas
+- `adjustedRectifiedCanvas`
+  - temp canvas for adjusted rectified preview
 - `frameCanvases`
+  - IMPORTANT: now treated as a lazy cache of base extracted frames
+- `adjustedFrameCache`
+  - lazy cache of appearance-adjusted preview/export frames
+- `frameCount`
+  - separate from `frameCanvases.length`, because the frame array may be sparse
 - `rectifiedPreviewCanvas`
 - `exportedGifUrl`
-- timers and preview-loop fields
 - `alignmentInfo`
+- `rawPageContour`
+- `processRequestId`
+- `pendingProcess`
+- `appearancePreviewRaf`
+- `appearancePreviewNeedsRectified`
 
-## High-level processing pipeline
+## High-level architecture
 
-The entry point is `processCurrentImage()`, which:
+### Big change: preview is now lazy
 
-1. Reads UI config.
-2. Applies appearance filters from `sourceCanvas` into `adjustedCanvas`.
-3. Calls `runPipeline(sourceCanvas, adjustedCanvas, config)`.
-4. Updates previews, cross-region display, GIF preview, and status.
+This is very important.
 
-### `runPipeline(...)`
+The app used to batch-render all adjusted frames after many control changes. That caused bad UI stalls, especially around appearance edits.
 
-The pipeline currently uses:
+Current architecture:
+
+- geometry-affecting controls rerun the CV/rectification/extraction pipeline
+- appearance changes do NOT rerun the full pipeline
+- resampling changes do NOT rerun the full pipeline
+- preview frames are extracted/rendered lazily on demand
+- full all-frame generation happens mainly when exporting GIFs
+
+This split is a major architectural change.
+
+## Processing pipeline
+
+### Entry point
+
+`processCurrentImage(requestId = state.processRequestId)`
+
+Used for geometry-changing controls and initial image load.
+
+High-level:
+
+1. read config
+2. run CV pipeline from source image
+3. cache:
+   - base extracted frame canvases
+   - base rectified sheet canvas
+   - alignment info
+   - page contour
+4. invalidate appearance caches
+5. refresh previews
+
+### `runPipeline(sourceCanvas, config, requestId)`
+
+Current `runPipeline(...)` no longer takes a pre-adjusted canvas.
+
+It uses:
 
 - `visionSrc = cv.imread(sourceCanvas)`
-- `styledSrc = cv.imread(adjustedCanvas)`
+- `styledSrc = cv.imread(sourceCanvas)`
 
-This means:
+This means the geometry pipeline is based on raw source imagery, and appearance adjustments are now applied later/lazily rather than during the main extraction pass.
 
-- computer vision runs on the unadjusted image
-- final visual output can use brightness/contrast/saturation-adjusted imagery
+## Page detection / thresholding
 
-### Stage 1: page detection
+Page detection pipeline:
 
-1. Convert `visionSrc` to grayscale.
-2. Estimate a paper threshold.
-3. Threshold to binary.
-4. Find the largest external contour.
-5. Approximate it to a quad.
-6. Order corners with `orderCorners(...)`.
+1. grayscale
+2. threshold
+3. largest contour
+4. quad approximation
+5. corner ordering
 
-Function names:
+Functions:
 
-- `estimatePaperThreshold(grayImg)`
+- `estimatePaperThreshold(grayImg, method, offset)`
 - `findLargestQuad(binaryMat, totalArea)`
 - `orderCorners(pts)`
 
-## Split-resolution architecture
+### Thresholding controls
 
-This was introduced because changing the original `paperWidthIn * 100` normalization scale broke the tuned corner-dot detector.
+`Thresholding Method`:
+
+- `Offset Peak`
+- `Otsu`
+
+`Thresholding Offset`:
+
+- range `-128 .. 128`
+- default `-20`
+
+Behavior:
+
+- `Offset Peak`: threshold = histogram peak + offset
+- `Otsu`: threshold = Otsu result + offset
+
+Otsu is available in this OpenCV.js build because `cv.THRESH_OTSU` is already used elsewhere.
+
+## Split-resolution geometry architecture
+
+This remains in place because the corner-dot detector was tuned to the original lower working scale.
 
 ### Detection warp
 
 Still fixed at:
 
-- `paperWidthIn * 100`
-- `paperHeightIn * 100`
+- `paperWidth * 100`
+- `paperHeight * 100`
 
 Purpose:
 
-- preserve the working scale expected by the existing gutter/dip / corner-dot finding code
+- preserve stable scale for corner-dot finding
 
 ### Extraction warp
 
-A second, larger page warp is created for better output resolution.
+Computed from:
 
-Current logic:
-
-- estimate raw page quad area in source image pixels
-- derive a larger page-warp size from the quad area and paper aspect ratio
-- never allow it to be smaller than the low-res detection warp
+- raw page quad area
+- requested paper aspect ratio
 
 Function:
 
 - `estimateHighResPageWarpSize(quadAreaPx, paperWidthIn, paperHeightIn, pageSizeLow)`
 
-The high-res page warp is used as the basis for final output-oriented work.
+This produces a larger page warp for output-oriented work.
 
-## Perspective warp details
+## Perspective/homography helpers
 
-Function:
-
-- `perspectiveWarp(visionSrc, styledSrc, ordered, size)`
-
-It now returns:
+`perspectiveWarp(...)` returns:
 
 - `visionMat`
 - `styledMat`
 - `forwardTransform`
 - `inverseTransform`
 
-The transform arrays are plain JS arrays extracted from OpenCV homography matrices.
-
-Helper functions:
+Helpers:
 
 - `homographyMatToArray(mat)`
 - `applyHomographyToPoint(point, homography)`
 - `mapDotRectThroughHomography(dotRect, homography)`
 
-These were added to support using the raw photo as the source for the final dot-based rectification.
-
-## Corner-dot detection
-
-The corner-dot finder runs on the low-resolution detection warp only.
-
-Workflow:
-
-1. Convert low-res page warp to blurred grayscale with `toLightnessGray(...)`
-2. Sum rows and columns
-3. Find the first dark dip from each edge using `findFirstDipFromEdge(...)`
-4. Refine each corner-dot center with `refineDotCentroid(...)`
-
-Function names:
-
-- `toLightnessGray(inMat)`
-- `columnSums(grayImg)`
-- `rowSums(grayImg)`
-- `findFirstDipFromEdge(profile, edge, options)`
-- `refineDotCentroid(grayMat, cx, cy, w, h, dscale)`
-- `findDotRect(pageGrayMat)`
-
-### Important constants
-
-At top of `app.js`:
-
-- `IGNORE_PX = 8`
-- `DOT_DIM_PCT_COLS = 0.03`
-- `DOT_DIM_PCT_ROWS = 0.02`
-- `GUTTER_PCT = 0.01`
-
-These are somewhat tuned to the current low-res detection warp scale. This is why simply replacing `100` with a larger number previously broke the rectification.
-
-## Dot rectangle scaling
-
-The detected corner-dot quad is found on the low-res detection warp, then scaled to the high-res extraction warp:
-
-- `scaleDotRect(dotRect, fromSize, toSize)`
-
-This assumes the low-res and high-res page warps represent the same source page geometry at different pixel densities.
+These are used for the `Use rectified as source` / raw-source final rectification split.
 
 ## Final rectification modes
 
-This is the main recent architectural change.
+### `Use rectified as source` checked
 
-### Mode A: `Use rectified as source` checked
+Final dot-based rectification is sourced from the high-res page warp.
 
-Current/original design.
-
-Final dot-based rectification uses:
-
-- `pageWarpHigh.visionMat`
-- `pageWarpHigh.styledMat`
-- `dotRectHigh`
-
-This means the final sheet is rectified from the already page-warped high-res image.
-
-### Mode B: `Use rectified as source` unchecked
-
-Alternative design for better detail preservation.
+### `Use rectified as source` unchecked
 
 Final dot-based rectification uses:
 
-- `visionSrc`
-- `styledSrc`
-- `dotRectHigh` mapped back into raw-photo coordinates using `pageWarpHigh.inverseTransform`
+- raw source image
+- high-res dot quad projected back through the inverse page homography
 
-This means:
+This is generally the more detail-preserving path and is now the default UI state.
 
-1. Low-res warp is used for stable dot detection.
-2. Dot quad is scaled to high-res page-warp coordinates.
-3. That high-res dot quad is projected back to the original image.
-4. Final `rectifyByDots(...)` is performed directly from the original full-resolution source image.
+## Corner-dot detection
 
-This path should preserve more true detail than repeatedly resampling intermediate warps.
+Still based on the low-res detection warp.
 
-## Dot-based rectification
+Functions:
 
-Function:
+- `toLightnessGray(...)`
+- `columnSums(...)`
+- `rowSums(...)`
+- `findFirstDipFromEdge(...)`
+- `refineDotCentroid(...)`
+- `findDotRect(...)`
 
-- `rectifyByDots(pageVision, pageStyled, dotRect, size, padding = 0)`
+Tuned constants:
 
-Inputs:
+- `IGNORE_PX`
+- `DOT_DIM_PCT_COLS`
+- `DOT_DIM_PCT_ROWS`
+- `GUTTER_PCT`
 
-- a source image pair
-- a 4-corner dot quad in the coordinate system of that source
-- target `size`
-- extra `padding`
+These remain somewhat scale-sensitive, which is why the fixed detection warp scale is still retained.
 
-Outputs:
+## Rectified sheet + grid bounds
+
+`rectifyByDots(...)` returns:
 
 - `visionMat`
 - `styledMat`
 - `gridBounds`
 
-### `gridBounds`
+`gridBounds` is critical because the final rectified sheet may include padding around the true dot rectangle in order to provide real pixel margins around edge cross ROIs.
 
-This is critical.
+The actual frame/cross lattice lives inside `gridBounds`, not necessarily across the full rectified image.
 
-Because the final rectified sheet is padded outward to provide real margin around edge cross ROIs, the true animation/cross lattice does not occupy the whole rectified image.
+## Cross detection / alignment
 
-`gridBounds` describes the actual inner lattice rectangle:
+Expected crosses:
 
-- `left`
-- `top`
-- `width`
-- `height`
-
-Many later computations must use `gridBounds`, not full image size.
-
-## Cross-region and cross-alignment workflow
-
-### Expected lattice
-
-Expected marker points are inferred as equal spacing over `gridBounds`:
-
-- total lattice is `(cols + 1) x (rows + 1)`
-- four corners are corner dots, not cross marks
-- all other lattice intersections are expected `+` marks
+- inferred as equal spacing over `gridBounds`
+- `(cols + 1) x (rows + 1)` lattice
+- four corners are dot anchors, not crosses
 
 Functions:
 
-- `getExpectedCrossLattice(bounds, cols, rows)`
-- `getRectifiedCornerAnchors(bounds, cols, rows)`
-
-### Cross ROI sizing
-
-Cross region size is based on the smaller frame-cell dimension:
-
-- `cellW = rectifiedWidth / cols`
-- `cellH = rectifiedHeight / rows`
-- `roiHalf = max(10, round(min(cellW, cellH) * 0.18 * crossRoiScale))`
-- side length = `2 * roiHalf + 1`
-
-The default slider value is currently `60`, not `75`.
-
-This corresponds to:
-
-- `crossRoiScale = slider / 100`
-- default `0.60`
-
-Relevant functions:
-
-- `estimateCrossRoiSidePx(...)`
-- `estimateDetectionPadding(...)`
-
-### Important clarification
-
-The UI slider is still percentage-like internally, but the user-facing readout is pixel size.
+- `getExpectedCrossLattice(...)`
+- `getRectifiedCornerAnchors(...)`
+- `buildCrossAlignmentData(...)`
+- `buildUnrefinedCrossRegionInfo(...)`
 
 ### Cross Regions panel behavior
 
-The Cross Regions panel should display ROI patches at intrinsic size, unscaled, without any decorative frame.
+When cross alignment is ON:
 
-Requirements that were explicitly requested:
+- refined cross locations are computed
+- panel shows ROI tiles with red crosshair at detected center
+- accepted/rejected hover text appears
 
-- no rounded-rect framing
-- no border/background nonsense
-- show true 1:1 ROI size
-- okay if panel scrolls
-- keep dotted placeholders for the four missing corner slots
+When cross alignment is OFF:
 
-If this ever looks wrong again, inspect CSS selectors affecting:
+- refined locations are not computed
+- ROI tiles are centered on nominal expected positions
+- red crosshair sits at exact tile center
+- hover text is suppressed
 
-- `.cross-roi-tile`
-- `.viewer-card canvas`
-- grid sizing/layout
+### Confidence / fallback policy
 
-## Cross detection mode
+- weak/failed crosses are rejected
+- ideal lattice positions are used as fallback
+- corner dots are used as corner anchors
+- if too many crosses are missing, pipeline falls back gracefully
 
-Function:
+## Subpixel refinement
 
-- `buildCrossAlignmentData(rectifiedMat, cols, rows, crossRoiScale, gridBounds)`
+Yes, the cross alignment path is truly subpixel.
 
-For each expected cross:
+Why:
 
-1. Extract a centered square ROI
-2. Threshold with Otsu
-3. Accumulate vertical/horizontal dark-pixel profiles in a central band
-4. Smooth the profiles
-5. Find weighted peaks
-6. Estimate subpixel center
-7. Compute confidence / acceptance
+- `getWeightedPeakIndex(...)` returns a fractional position
+- `detectCrossAtExpectedPosition(...)` maps that fractional peak back to floating-point sheet coordinates
+- those floating-point coordinates feed the per-frame quad extraction
 
-Key functions:
-
-- `detectCrossAtExpectedPosition(...)`
-- `extractCenteredSquareRoi(...)`
-- `buildCrossRoiCanvas(...)`
-- `getWeightedPeakIndex(...)`
-- `smooth1D(...)`
-
-### Critical bug that was fixed
-
-`smooth1D()` used to be a trailing moving average, which shifted peaks consistently down-right in the detected centers. It is now a centered moving average. This was a real bug and visibly improved both the debug view and GIF jitter.
-
-### Another critical bug that was fixed
-
-Edge ROIs used to be sampled from an image cropped too tightly to the dot rectangle, which caused edge-region ROI padding to be filled with replicated pixels instead of real paper/image content. This was fixed by padding the final rectified sheet and keeping `gridBounds` inside it.
-
-### ROI centering note
-
-ROIs are now odd-sized and use a true center pixel convention.
-
-## Unrefined cross-region display mode
-
-When `Use cross-based subpixel alignment` is unchecked:
-
-- refined cross locations should not be computed or shown
-- extraction should use nominal/fallback geometry
-- Cross Regions should still be displayed
-- each ROI patch should be centered on the nominal expected cross position
-- the red crosshair should be drawn exactly at the center of the patch
-- the hover overlay text like `(0, 1) rejected` should not appear
-
-This mode is meant to show the actual unrefined locations being used, so the user can visually compare the ignored real cross to the centered nominal crosshair.
-
-Function:
-
-- `buildUnrefinedCrossRegionInfo(...)`
-- `buildUnrefinedCrossRegionTile(...)`
-
-## Marker fallback policy
-
-If a cross is missing or rejected:
-
-- use the ideal lattice position for that marker
-
-Corner markers:
-
-- use the corner-dot anchor positions
-
-This ensures all frames always have a complete marker set even with some missing cross detections.
+This is subpixel estimation, not just integer snapping.
 
 ## Frame extraction
 
-Function:
+Current frame extraction still uses per-frame perspective warps.
 
-- `sliceRectifiedToCanvases(rectifiedMat, extractionInfo, crop)`
+Functions:
 
-Current extraction uses:
-
-- per-frame full perspective warp, not just translation and not just affine
-
-For each frame:
-
-1. Resolve its four surrounding lattice points.
-2. These points may be:
-  - detected cross centers
-  - ideal fallback cross positions
-  - corner-dot anchors
-3. Apply crop margins in normalized cell coordinates.
-4. Bilinearly interpolate source quad corners.
-5. Build a 4-point perspective transform to a rectangular output frame.
-6. Warp the source patch into the output frame canvas.
-
-This was upgraded in stages:
-
-- originally nominal slicing
-- then translation-only correction
-- then affine
-- finally full perspective warp per frame
-
-The current state is full perspective per frame.
-
-## Appearance pipeline
-
-Appearance controls are intentionally separate from CV:
-
-- CV uses `sourceCanvas`
-- final styled extraction uses `adjustedCanvas`
-
-Function:
-
-- `applyVisualAdjustments(sourceCanvas, targetCanvas, filters)`
-
-Uses browser canvas filters:
-
-- brightness
-- contrast
-- saturate
-
-These transforms must still apply whether final rectification uses the rectified source or the raw source.
-
-## Preview rendering
-
-The visible canvases are previews only. They should preserve aspect ratio and redraw on resize.
-
-Relevant functions:
-
-- `renderCanvasFit(sourceCanvas, targetCanvas)`
-- `resizeCanvasToBox(canvas)`
-- `renderRectifiedPreview(rectifiedCanvas)`
-- `drawCurrentGifPreview()`
-- `rerenderPreviews()`
-
-Several CSS/layout bugs were fixed so repeated window resizes should no longer push previews downward/offscreen.
+- `sliceRectifiedToCanvases(...)`
+- `extractSingleFrameToCanvas(...)`
+- `resolveFrameQuad(...)`
+- `bilerpQuad(...)`
 
 Important:
 
-- The panel-sized preview canvases are not the data used for CV or output.
-- `sourceCanvas` and `rectifiedPreviewCanvas` are the backing canvases used for drag/export.
+- `sliceRectifiedToCanvases(...)` is still used during the full geometry pipeline
+- `extractSingleFrameToCanvas(...)` is also used later for lazy on-demand frame extraction
 
-## GIF preview/export
+## Lazy preview architecture
 
-Preview:
+This is one of the most important new sections.
 
-- `startGifPreviewLoop()`
+### Base frame cache
+
+`state.frameCanvases`
+
+- stores base extracted frames
+- may be sparse
+- should be thought of as a lazy cache, not a guaranteed fully populated contiguous batch
+
+### Base frame lookup
+
+`getBaseFrameCanvas(index)`
+
+- returns cached base frame if present
+- otherwise:
+  - uses cached `baseRectifiedCanvas`
+  - uses cached `alignmentInfo`
+  - uses current crop + resampling
+  - extracts a single frame on demand
+  - caches it in `state.frameCanvases[index]`
+
+This is why `Resampling` can now be lazy.
+
+### Adjusted frame cache
+
+`state.adjustedFrameCache`
+
+`getAdjustedFrameCanvas(index)`
+
+- reads base frame via `getBaseFrameCanvas(index)`
+- if appearance adjustments are zero, returns base frame
+- otherwise applies appearance adjustments to a per-frame canvas lazily
+- caches the adjusted result
+
+### Preview loop
+
+`drawCurrentGifPreview()`
+
+- asks for the adjusted current frame lazily
+- does not require all frames to be precomputed
+
+`startGifPreviewLoop()`
+
+- uses `state.frameCount` instead of assuming `frameCanvases.length` is a full batch
+
+## Appearance pipeline
+
+Appearance controls are now:
+
+- `Brightness`
+- `Contrast`
+- `Vibrance`
+
+Old `Saturation` is gone.
+
+### Important implementation change
+
+Appearance is now performed in a single OKLab pass.
+
+Workflow per pixel:
+
+1. `sRGB -> OKLab`
+2. apply brightness on `L`
+3. apply contrast curve on `L`
+4. apply vibrance on chroma (`a`, `b`)
+5. `OKLab -> sRGB`
+
+This replaced the older mixture of canvas filters + multiple passes.
+
+Functions:
+
+- `applyVisualAdjustments(sourceCanvas, targetCanvas, filters)`
+- `applyOklabAppearanceAdjustments(canvas, filters)`
+- `srgbToOklab(...)`
+- `oklabToSrgb(...)`
+- `srgbToLinear(...)`
+- `linearToSrgb(...)`
+
+### Brightness
+
+Brightness is perceptual:
+
+- implemented as an OKLab `L` shift
+
+### Contrast
+
+Contrast is midpoint-preserving and now applied to OKLab `L`, not RGB channels.
+
+Functions:
+
+- `mapContrastSliderToCurveStrength(...)`
+- `applyMidpointSCurve(value, k)`
+
+Negative contrast:
+
+- uses the inverse S-curve logic
+- should truly reduce contrast instead of mirroring positive contrast
+
+### Vibrance
+
+Vibrance is adaptive, not plain saturation.
+
+Behavior:
+
+- boosts muted colors more
+- leaves already vivid colors more stable
+- implemented via OKLab chroma scaling with an adaptive `(1 - normalized_chroma)` style factor
+
+Functions:
+
+- `mapVibranceSliderToAmount(...)`
+
+The vibrance strength mapping was made stronger than the original timid version.
+
+### No-op shortcut
+
+If `Brightness == 0 && Contrast == 0 && Vibrance == 0`, the OKLab appearance pass is skipped entirely.
+
+## Appearance slider responsiveness
+
+This changed multiple times; current state matters.
+
+Current behavior:
+
+- appearance slider `input` no longer does heavy work synchronously inside every DOM event
+- slider input now:
+  - revokes stale GIF
+  - updates readouts
+  - invalidates appearance cache
+  - schedules one preview update via `requestAnimationFrame`
+  - cancels stale in-flight geometry work
+
+- the expensive rectified-sheet adjusted preview is deferred until slider release
+- while dragging, the app mainly updates the current animation preview frame lazily
+
+Implementation helpers:
+
+- `scheduleAppearancePreviewUpdate(includeRectified = false)`
+- `appearancePreviewRaf`
+- `appearancePreviewNeedsRectified`
+
+This was introduced because direct OKLab rendering inside every slider `input` callback made both the animation and the slider itself sluggish.
+
+## Resampling behavior
+
+`Resampling` now lives under `Appearance`, not `GIF Export Options`.
+
+Options are runtime-populated in `populateResamplingOptions()`:
+
+- `Balanced (Linear)`
+- `Sharper (Cubic)`
+- `Maximum Detail (Lanczos)` if `cv.INTER_LANCZOS4` exists in this OpenCV build
+
+Important:
+
+- Resampling no longer forces a full geometry rerun
+- it now invalidates frame caches and lazily re-extracts preview frames from the cached rectified sheet/alignment data
+
+This is an important recent improvement.
+
+## GIF export options
+
+Current user-facing options:
+
+- `Frame Rate`
+- `Encoding Quality (lower is better)`
+- `Dithering`
+- `Use Global Palette`
+
+### Dithering choices
+
+Curated list:
+
+- `Off`
+- `Standard (Floyd-Steinberg)`
+- `Smooth (Floyd-Steinberg Serpentine)` default
+- `Retro (Atkinson)`
+
+### Encoding quality
+
+Important:
+
+- lower number = better quality / slower
+- higher number = lower quality / faster
+
+This is a property of the specific `gif.js` build in use.
+
+### What export controls affect
+
+- `Frame Rate`, `Encoding Quality`, `Dithering`, `Use Global Palette`
+  do NOT require a geometry rerun
+
+- Export uses `getAdjustedFrameCanvas(i)` across all frames at export time, so the full adjusted batch is effectively realized only when needed for GIF writing.
+
+## Raw photo overlay
+
+The `Raw Photo` panel now outlines the detected page contour with:
+
+- semi-transparent lime stroke
+
+The contour is stored in `state.rawPageContour` and redrawn on resize.
+
+## Resize behavior
+
+Previews maintain aspect ratio and redraw on resize.
+
+Relevant functions:
+
+- `renderCanvasFit(...)`
+- `renderRawPreview()`
+- `renderRectifiedPreview(...)`
 - `drawCurrentGifPreview()`
+- `rerenderPreviews()`
 
-Export:
+There were several past CSS/layout bugs around viewer drift and stale canvas resizing; current code attempts to avoid them by redrawing on resize.
 
-- `exportGif()`
+## Drag/export behavior
 
-Uses local `gif.js` and `../plottimation_GIF_generator/gif.worker.js`.
+- `Raw Photo` drag uses the full-resolution `state.sourceCanvas`
+- `Rectified Sheet` drag uses the backing rectified canvas, not just the panel preview
+- exported GIF drag uses `DownloadURL` with the friendly filename
 
-Export behavior:
+## OpenCV.js runtime caveat
 
-- auto-downloads GIF on completion
-- shows exported GIF image in panel
-- exported image is hidden until export exists
-- drag-out of exported GIF should preserve the friendly filename
+The project uses a local OpenCV.js build that appears older / asm.js style.
 
-Helper functions:
+Known implication:
 
-- `makeGifFilename(sourceFilename)`
-- `sanitizeFilenameBase(filename)`
-- `downloadBlobWithFilename(blob, filename)`
-- `revokeGifUrl()`
+- not all OpenCV APIs are available
+- earlier, `cv.getRectSubPix` was missing
 
-## Known OpenCV runtime constraint
+So code should prefer conservative OpenCV APIs that are already known to work in this build.
 
-The app uses a local OpenCV.js build that is an older asm.js-style bundle. This likely has a smaller or older API surface than more modern OpenCV.js builds. A concrete issue encountered earlier was:
+## Important recent bug fixes / lessons
 
-- `cv.getRectSubPix` was not available
+1. `smooth1D()` used to be a trailing moving average, which biased cross detections down-right.
+   It is now centered.
 
-Because of this, code should prefer conservative OpenCV APIs already known to work in this build:
+2. Edge cross ROIs used to be sampled from images cropped too tightly, causing replicated-border junk.
+   This was fixed by padding the rectified sheet and tracking `gridBounds`.
 
-- `warpPerspective`
-- `warpAffine`
-- `getPerspectiveTransform`
-- etc.
+3. Cross Regions must remain useful both with alignment enabled and disabled.
 
-Avoid assuming every OpenCV.js API exists.
+4. Resampling and appearance should not trigger full geometry work unnecessarily.
 
-## Important user preferences and design decisions
+5. The slider lag issue was caused by doing heavy appearance work directly inside `input` handlers on the main thread.
+   Current code defers/coalesces this with `requestAnimationFrame`.
 
-- User dislikes spaces in filenames.
-- User wants plain/neutral styling, not decorative styling.
-- User wants the Cross Regions panel because it is more useful than the old rectified-sheet debug overlay.
-- The old `Show cross-alignment debug overlay` feature was intentionally removed.
-- The Cross Regions panel must continue to work even when cross-based alignment is disabled.
+## Current defaults
 
-## Current defaults and knobs
-
+- paper preset default: `Letter (11×8.5 in)`
 - frame columns default: `5`
 - frame rows default: `4`
-- sheet width default: `11`
-- sheet height default: `8.5`
-- frame rate default: `20`
-- cross-region slider default: `60`
-- cross-region slider range: `30..150`
+- threshold method default: `Offset Peak`
+- threshold offset default: `-20`
+- cross region slider default: `60`
 - use cross alignment default: checked
-- use rectified as source default: checked
+- use rectified as source default: unchecked
+- brightness default: `0`
+- contrast default: `0`
+- vibrance default: `0`
+- resampling default: `linear`
+- fps default: `20`
+- gif quality default: `10`
+- dithering default: `Smooth (Floyd-Steinberg Serpentine)`
+- global palette default: unchecked
 
-## Things that were intentionally not done
+## Things intentionally removed or changed from earlier versions
 
-- No page preset UI
-- No portrait/landscape preset UI
-- No p5.js
-- No extra cross-alignment overlay on the rectified sheet
+- no p5.js
+- no page preset/orientation split beyond current landscape-oriented paper preset list
+- no old rectified-sheet cross overlay debug UI
+- old `Saturation` replaced by `Vibrance`
+- `Playback` panel removed; frame rate moved into `GIF Export Options`
+- `Detection` and `Alignment` merged into one panel
 
-## Likely next technical areas of work
+## Good next debugging questions
 
-1. Compare image quality between:
-   - `Use rectified as source` checked
-   - `Use rectified as source` unchecked
+If something regresses, check these:
 
-2. If raw-source mode produces visible improvements, consider making it the default.
-
-3. Evaluate whether interpolation method should become a user-facing advanced setting:
-   - linear
-   - cubic
-   - Lanczos
-
-4. Continue improving cross localization if jitter remains.
-
-5. If further resolution improvements are needed, prefer architectures that source the last warp from the original image rather than merely upscaling intermediate rectified images.
-
-## Risks / fragile points
-
-- Corner-dot detection remains somewhat scale-tuned to the low-res detection warp.
-- OpenCV.js build may lack some APIs and may differ from newer documentation.
-- If CSS changes accidentally reapply generic canvas styling to Cross Regions, the ROI display may again become scaled or framed incorrectly.
-- If the raw-source rectification path is modified, be careful to preserve:
-  - separate vision vs styled source mats
-  - correct inverse homography usage
-  - correct final `gridBounds`
-
-## Sanity checks for future debugging
-
-When debugging output quality, check these first:
-
-1. Status panel values:
-   - raw photo size
-   - detection warp
-   - extraction warp
-   - rectified sheet
-   - animation size
-   - frame source
-
-2. Cross Regions panel:
-   - are edge ROIs centered correctly?
-   - are ROIs truly square?
-   - are they unscaled?
-   - does the red crosshair match detected center when alignment is on?
-   - does it stay centered when alignment is off?
-
-3. Source mode:
-   - checked: final source is high-res page warp
-   - unchecked: final source is raw photo with inverse-mapped dot quad
-
-4. If a consistent directional bias appears in cross detection again:
-   - inspect `smooth1D()`
-   - inspect ROI center convention
-   - inspect coordinate mapping from ROI local coordinates back to sheet coordinates
-
-5. If edge crosses start failing again:
-   - inspect final rectification padding
-   - inspect `gridBounds`
-   - inspect whether ROI extraction is using real margin pixels rather than replicated border fill
+1. Did a control incorrectly trigger `processCurrentImage()` when it should only invalidate lazy caches?
+2. Is `state.frameCount` correct even when `state.frameCanvases` is sparse?
+3. Is `getBaseFrameCanvas(index)` extracting from the correct cached rectified sheet and alignment info?
+4. Is `Resampling` accidentally causing geometry recalculation again?
+5. Are appearance slider handlers doing too much work directly on `input` instead of via `scheduleAppearancePreviewUpdate()`?
+6. If cross alignment seems wrong, inspect:
+   - Cross Regions panel
+   - ROI centering
+   - edge ROI padding behavior
+   - confidence thresholds
+   - fractional detected positions
 
 ## Minimal mental model
 
-The most useful way to think about this app is:
+Think of the app as having three layers:
 
-- detect geometry at a stable scale
-- rectify for output at higher quality
-- optionally refine frame geometry with interior crosses
-- keep CV and visual styling separated
-- keep user-facing diagnostics visible
-- preserve original-image detail whenever the final warp can reasonably use it
+1. Geometry layer
+   - page detection
+   - corner-dot detection
+   - final rectification
+   - cross alignment
+   - frame quads
+
+2. Base image layer
+   - raw uploaded image
+   - base rectified sheet
+   - lazily extracted base frames
+
+3. Appearance/export layer
+   - lazy OKLab appearance adjustment for preview
+   - lazy resampling-based frame extraction
+   - full all-frame realization only when exporting GIFs
+
+If you preserve that separation, the app stays responsive.
 

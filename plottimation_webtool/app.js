@@ -4,15 +4,34 @@ const DOT_DIM_PCT_ROWS = 0.02;
 const GUTTER_PCT = 0.01;
 const MIN_CROSS_DETECTION_RATIO = 0.5;
 const MIN_CROSS_DETECTIONS_ABS = 4;
+const PAPER_PRESETS = {
+  letter: { width: 11, height: 8.5 },
+  legal: { width: 14, height: 8.5 },
+  tabloid: { width: 17, height: 11 },
+  "9x12": { width: 9, height: 12 },
+  "18x12": { width: 18, height: 12 },
+  "24x18": { width: 24, height: 18 },
+  "36x24": { width: 36, height: 24 },
+  a4: { width: 297, height: 210 },
+  a3: { width: 420, height: 297 },
+  a2: { width: 594, height: 420 },
+  a1: { width: 841, height: 594 },
+};
 
 const dom = {
   dropZone: document.querySelector("#dropZone"),
   fileInput: document.querySelector("#fileInput"),
+  loadDemoButton: document.querySelector("#loadDemoButton"),
   exportButton: document.querySelector("#exportButton"),
+  paperPreset: document.querySelector("#paperPreset"),
+  customPaperFields: document.querySelector("#customPaperFields"),
   paperWidth: document.querySelector("#paperWidth"),
   paperHeight: document.querySelector("#paperHeight"),
   frameCols: document.querySelector("#frameCols"),
   frameRows: document.querySelector("#frameRows"),
+  thresholdMethod: document.querySelector("#thresholdMethod"),
+  thresholdOffset: document.querySelector("#thresholdOffset"),
+  thresholdOffsetValue: document.querySelector("#thresholdOffsetValue"),
   crossRoiScale: document.querySelector("#crossRoiScale"),
   crossRoiScaleValue: document.querySelector("#crossRoiScaleValue"),
   useCrossAlignment: document.querySelector("#useCrossAlignment"),
@@ -25,9 +44,14 @@ const dom = {
   brightnessValue: document.querySelector("#brightnessValue"),
   contrast: document.querySelector("#contrast"),
   contrastValue: document.querySelector("#contrastValue"),
-  saturation: document.querySelector("#saturation"),
-  saturationValue: document.querySelector("#saturationValue"),
+  vibrance: document.querySelector("#vibrance"),
+  vibranceValue: document.querySelector("#vibranceValue"),
   fps: document.querySelector("#fps"),
+  gifQuality: document.querySelector("#gifQuality"),
+  gifQualityValue: document.querySelector("#gifQualityValue"),
+  gifDither: document.querySelector("#gifDither"),
+  gifResampling: document.querySelector("#gifResampling"),
+  gifGlobalPalette: document.querySelector("#gifGlobalPalette"),
   statusText: document.querySelector("#statusText"),
   rawCanvas: document.querySelector("#rawCanvas"),
   rawPhotoName: document.querySelector("#rawPhotoName"),
@@ -35,6 +59,8 @@ const dom = {
   gifPreviewCanvas: document.querySelector("#gifPreviewCanvas"),
   gifImage: document.querySelector("#gifImage"),
   crossRoiGrid: document.querySelector("#crossRoiGrid"),
+  resetAppearanceButton: document.querySelector("#resetAppearanceButton"),
+  resetTrimButton: document.querySelector("#resetTrimButton"),
 };
 
 const state = {
@@ -43,9 +69,12 @@ const state = {
   sourceFilename: "",
   exportedGifFilename: "",
   sourceCanvas: document.createElement("canvas"),
-  adjustedCanvas: document.createElement("canvas"),
   frameCanvases: [],
+  baseRectifiedCanvas: null,
+  adjustedRectifiedCanvas: document.createElement("canvas"),
   rectifiedPreviewCanvas: null,
+  adjustedFrameCache: new Map(),
+  frameCount: 0,
   exportedGifUrl: "",
   processTimer: 0,
   resizeTimer: 0,
@@ -54,12 +83,18 @@ const state = {
   previewFrameIndex: 0,
   previewLastTime: 0,
   alignmentInfo: null,
+  rawPageContour: null,
+  processRequestId: 0,
+  pendingProcess: false,
+  appearancePreviewRaf: 0,
+  appearancePreviewNeedsRectified: false,
 };
 
 init();
 
 function init() {
   attachUi();
+  syncPaperPresetUi();
   dom.gifImage.classList.add("hidden");
   dom.gifImage.hidden = true;
   dom.gifImage.removeAttribute("src");
@@ -107,11 +142,52 @@ function attachUi() {
     }
   });
 
-  [
+  dom.loadDemoButton.addEventListener("click", () => {
+    void loadImageSource("demo/mySrcImage.jpg", "mySrcImage.jpg");
+  });
+
+  attachResetButton(dom.resetAppearanceButton, resetAppearanceControls);
+  attachResetButton(dom.resetTrimButton, resetTrimControls);
+
+  dom.paperPreset.addEventListener("input", () => {
+    syncPaperPresetUi();
+    updateSliderReadouts();
+    scheduleProcess();
+  });
+  dom.paperPreset.addEventListener("change", () => {
+    syncPaperPresetUi();
+    scheduleProcess();
+  });
+
+  const appearanceInputs = [
+    dom.brightness,
+    dom.contrast,
+    dom.vibrance,
+  ];
+
+  appearanceInputs.forEach((input) => {
+    input.addEventListener("input", () => {
+      revokeGifUrl();
+      updateSliderReadouts();
+      invalidateAppearanceCache();
+      scheduleAppearancePreviewUpdate(false);
+      cancelInFlightProcessing();
+    });
+    input.addEventListener("change", () => {
+      revokeGifUrl();
+      updateSliderReadouts();
+      invalidateAppearanceCache();
+      scheduleAppearancePreviewUpdate(true);
+    });
+  });
+
+  const processingInputs = [
     dom.paperWidth,
     dom.paperHeight,
     dom.frameCols,
     dom.frameRows,
+    dom.thresholdMethod,
+    dom.thresholdOffset,
     dom.crossRoiScale,
     dom.useCrossAlignment,
     dom.useRectifiedAsSource,
@@ -119,16 +195,42 @@ function attachUi() {
     dom.cropRight,
     dom.cropTop,
     dom.cropBottom,
-    dom.brightness,
-    dom.contrast,
-    dom.saturation,
-    dom.fps,
-  ].forEach((input) => {
+  ];
+
+  processingInputs.forEach((input) => {
     input.addEventListener("input", () => {
+      revokeGifUrl();
       updateSliderReadouts();
       scheduleProcess();
     });
-    input.addEventListener("change", scheduleProcess);
+    input.addEventListener("change", () => {
+      revokeGifUrl();
+      scheduleProcess();
+    });
+  });
+
+  [
+    dom.fps,
+    dom.gifQuality,
+    dom.gifDither,
+    dom.gifResampling,
+    dom.gifGlobalPalette,
+  ].forEach((input) => {
+    input.addEventListener("input", () => {
+      revokeGifUrl();
+      updateSliderReadouts();
+      if (input === dom.gifResampling) {
+        invalidateFrameCaches();
+      }
+      drawCurrentGifPreview();
+    });
+    input.addEventListener("change", () => {
+      revokeGifUrl();
+      if (input === dom.gifResampling) {
+        invalidateFrameCaches();
+      }
+      drawCurrentGifPreview();
+    });
   });
 
   dom.exportButton.addEventListener("click", () => {
@@ -173,9 +275,88 @@ function makeGifImageDraggable() {
   });
 }
 
+function attachResetButton(button, onReset) {
+  if (!button) return;
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onReset();
+  });
+}
+
+function resetAppearanceControls() {
+  dom.brightness.value = "0";
+  dom.contrast.value = "0";
+  dom.vibrance.value = "0";
+  dom.gifResampling.value = "linear";
+  revokeGifUrl();
+  updateSliderReadouts();
+  invalidateFrameCaches();
+  invalidateAppearanceCache();
+  refreshAppearanceOutputs();
+  applyLiveAppearancePreview();
+}
+
+function resetTrimControls() {
+  dom.cropLeft.value = "0";
+  dom.cropRight.value = "0";
+  dom.cropTop.value = "0";
+  dom.cropBottom.value = "0";
+  revokeGifUrl();
+  updateSliderReadouts();
+  scheduleProcess();
+}
+
 function onOpenCvReady() {
   state.cvReady = true;
+  populateResamplingOptions();
   setStatus("OpenCV.js ready.\nLoad frame-sheet image to begin.");
+}
+
+function cancelInFlightProcessing() {
+  state.processRequestId += 1;
+  state.pendingProcess = false;
+}
+
+function scheduleAppearancePreviewUpdate(includeRectified = false) {
+  state.appearancePreviewNeedsRectified = state.appearancePreviewNeedsRectified || includeRectified;
+  if (state.appearancePreviewRaf) {
+    return;
+  }
+  state.appearancePreviewRaf = requestAnimationFrame(() => {
+    state.appearancePreviewRaf = 0;
+    if (state.appearancePreviewNeedsRectified) {
+      refreshAppearanceOutputs();
+    }
+    state.appearancePreviewNeedsRectified = false;
+    applyLiveAppearancePreview();
+  });
+}
+
+function populateResamplingOptions() {
+  const select = dom.gifResampling;
+  if (!select) return;
+  const previousValue = select.value || "linear";
+  select.innerHTML = "";
+
+  const options = [
+    { value: "linear", label: "Balanced (Linear)" },
+    { value: "cubic", label: "Sharper (Cubic)" },
+  ];
+
+  if (typeof cv !== "undefined" && typeof cv.INTER_LANCZOS4 !== "undefined") {
+    options.push({ value: "lanczos", label: "Maximum Detail (Lanczos)" });
+  }
+
+  for (const option of options) {
+    const el = document.createElement("option");
+    el.value = option.value;
+    el.textContent = option.label;
+    if (option.value === previousValue) {
+      el.selected = true;
+    }
+    select.appendChild(el);
+  }
 }
 
 function attachResizeHandler() {
@@ -189,40 +370,63 @@ function attachResizeHandler() {
 
 async function handleFile(file) {
   const url = URL.createObjectURL(file);
+  await loadImageSource(url, file.name || "", () => {
+    URL.revokeObjectURL(url);
+  });
+}
+
+async function loadImageSource(src, filename = "", onComplete = null) {
   const image = new Image();
   image.onload = async () => {
-    URL.revokeObjectURL(url);
-    state.sourceImage = image;
-    state.sourceFilename = file.name || "";
-    dom.rawPhotoName.textContent = `(${file.name})`;
-    drawImageToCanvas(image, state.sourceCanvas);
-    renderCanvasFit(state.sourceCanvas, dom.rawCanvas);
-    dom.gifImage.classList.add("hidden");
-    dom.gifImage.hidden = true;
-    revokeGifUrl();
-    await processCurrentImage();
+    try {
+      document.body.classList.add("has-loaded-image");
+      state.sourceImage = image;
+      state.sourceFilename = filename || "";
+      state.rawPageContour = null;
+      state.baseRectifiedCanvas = null;
+      invalidateAppearanceCache();
+      dom.rawPhotoName.textContent = filename ? `(${filename})` : "";
+      drawImageToCanvas(image, state.sourceCanvas);
+      renderRawPreview();
+      dom.gifImage.classList.add("hidden");
+      dom.gifImage.hidden = true;
+      revokeGifUrl();
+      await processCurrentImage();
+    } finally {
+      onComplete?.();
+    }
   };
   image.onerror = () => {
-    URL.revokeObjectURL(url);
+    onComplete?.();
     setStatus("Failed to load the selected image.");
   };
-  image.src = url;
+  image.src = src;
 }
 
 function scheduleProcess() {
   if (!state.sourceImage) return;
+  state.processRequestId += 1;
+  const requestId = state.processRequestId;
   window.clearTimeout(state.processTimer);
   state.processTimer = window.setTimeout(() => {
-    void processCurrentImage();
+    void processCurrentImage(requestId);
   }, 220);
 }
 
 function readConfig() {
+  const paperPreset = dom.paperPreset.value || "letter";
+  const presetSize = PAPER_PRESETS[paperPreset];
+  const isCustomPaper = paperPreset === "custom";
+  const paperWidth = isCustomPaper ? (Number(dom.paperWidth.value) || 11) : (presetSize?.width || 11);
+  const paperHeight = isCustomPaper ? (Number(dom.paperHeight.value) || 8.5) : (presetSize?.height || 8.5);
   return {
-    paperWidthIn: Math.max(1, Number(dom.paperWidth.value) || 11),
-    paperHeightIn: Math.max(1, Number(dom.paperHeight.value) || 8.5),
+    paperPreset,
+    paperWidthIn: Math.max(1, paperWidth),
+    paperHeightIn: Math.max(1, paperHeight),
     frameCols: Math.max(1, Math.round(Number(dom.frameCols.value) || 5)),
     frameRows: Math.max(1, Math.round(Number(dom.frameRows.value) || 4)),
+    thresholdMethod: dom.thresholdMethod.value || "offset-peak",
+    thresholdOffset: Math.max(-128, Math.min(128, Math.round(Number(dom.thresholdOffset.value) || -20))),
     crossRoiScalePct: Math.max(30, Math.min(150, Number(dom.crossRoiScale.value) || 60)),
     crossRoiScale: Math.max(0.3, Math.min(1.5, (Number(dom.crossRoiScale.value) || 60) / 100)),
     useCrossAlignment: dom.useCrossAlignment.checked,
@@ -236,16 +440,41 @@ function readConfig() {
     filters: {
       brightness: Number(dom.brightness.value) || 0,
       contrast: Number(dom.contrast.value) || 0,
-      saturation: Number(dom.saturation.value) || 0,
+      vibrance: Number(dom.vibrance.value) || 0,
     },
     fps: Math.max(1, Math.min(60, Math.round(Number(dom.fps.value) || 20))),
+    exportOptions: {
+      quality: Math.max(1, Math.min(20, Math.round(Number(dom.gifQuality.value) || 10))),
+      dither: (dom.gifDither.value && dom.gifDither.value !== "off") ? dom.gifDither.value : false,
+      resampling: dom.gifResampling.value || "linear",
+      globalPalette: dom.gifGlobalPalette.checked,
+    },
   };
+}
+
+function syncPaperPresetUi() {
+  const presetKey = dom.paperPreset.value || "letter";
+  const isCustom = presetKey === "custom";
+  const preset = PAPER_PRESETS[presetKey];
+  dom.customPaperFields.hidden = !isCustom;
+  dom.paperWidth.disabled = !isCustom;
+  dom.paperHeight.disabled = !isCustom;
+  if (!isCustom && preset) {
+    dom.paperWidth.value = String(preset.width);
+    dom.paperHeight.value = String(preset.height);
+  }
 }
 
 function updateSliderReadouts() {
   dom.brightnessValue.textContent = formatSignedValue(dom.brightness.value);
   dom.contrastValue.textContent = formatSignedValue(dom.contrast.value);
-  dom.saturationValue.textContent = formatSignedValue(dom.saturation.value);
+  dom.vibranceValue.textContent = formatSignedValue(dom.vibrance.value);
+  dom.thresholdOffsetValue.textContent = formatSignedValue(dom.thresholdOffset.value);
+  dom.gifQualityValue.textContent = String(Math.max(1, Math.min(20, Number(dom.gifQuality.value) || 10)));
+  if (!state.alignmentInfo) {
+    dom.crossRoiScaleValue.textContent = "-- px";
+    return;
+  }
   const config = readConfig();
   const roiSizePx = estimateCrossRoiSidePx(
     state.alignmentInfo?.rectifiedWidth,
@@ -273,52 +502,73 @@ function estimateCrossRoiSidePx(gridWidth, gridHeight, cols, rows, crossRoiScale
   return roiHalf * 2 + 1;
 }
 
-async function processCurrentImage() {
+async function processCurrentImage(requestId = state.processRequestId) {
   if (!state.cvReady) {
     setStatus("OpenCV is still loading.");
     return;
   }
-  if (!state.sourceImage || state.processing) return;
+  if (!state.sourceImage) return;
+  if (state.processing) {
+    state.pendingProcess = true;
+    return;
+  }
 
   state.processing = true;
   dom.exportButton.disabled = true;
 
   try {
     const config = readConfig();
-    applyVisualAdjustments(state.sourceCanvas, state.adjustedCanvas, config.filters);
-    const result = runPipeline(state.sourceCanvas, state.adjustedCanvas, config);
+    const result = runPipeline(state.sourceCanvas, config, requestId);
+    if (requestId !== state.processRequestId) {
+      return;
+    }
     state.frameCanvases = result.frames;
+    state.frameCount = result.frames.length;
     state.alignmentInfo = result.alignmentInfo;
-    state.rectifiedPreviewCanvas = result.rectifiedCanvas;
+    state.baseRectifiedCanvas = result.rectifiedCanvas;
+    state.rawPageContour = result.pageQuadPoints;
+    invalidateAppearanceCache();
     updateSliderReadouts();
-    renderCanvasFit(state.sourceCanvas, dom.rawCanvas);
-    renderRectifiedPreview(result.rectifiedCanvas);
+    renderRawPreview();
+    refreshAppearanceOutputs();
     renderCrossRoiGrid(result.alignmentInfo);
     drawCurrentGifPreview();
-    dom.exportButton.disabled = state.frameCanvases.length === 0;
+    dom.exportButton.disabled = state.frameCount === 0;
     setStatus(result.statusText);
   } catch (error) {
+    if (error?.name === "ProcessAbortedError") {
+      return;
+    }
     console.error(error);
     setStatus("Processing failed.\n" + (error?.message || String(error)));
   } finally {
     state.processing = false;
+    if (state.pendingProcess) {
+      state.pendingProcess = false;
+      window.clearTimeout(state.processTimer);
+      state.processTimer = window.setTimeout(() => {
+        void processCurrentImage(state.processRequestId);
+      }, 0);
+    }
   }
 }
 
-function runPipeline(sourceCanvas, adjustedCanvas, config) {
+function runPipeline(sourceCanvas, config, requestId) {
   const visionSrc = cv.imread(sourceCanvas);
-  const styledSrc = cv.imread(adjustedCanvas);
+  const styledSrc = cv.imread(sourceCanvas);
 
   const grayImg = new cv.Mat();
   const thresh = new cv.Mat();
 
   try {
     cv.cvtColor(visionSrc, grayImg, cv.COLOR_RGBA2GRAY);
-    const threshVal = estimatePaperThreshold(grayImg);
+    const threshVal = estimatePaperThreshold(grayImg, config.thresholdMethod, config.thresholdOffset);
     cv.threshold(grayImg, thresh, threshVal, 255, cv.THRESH_BINARY);
+    throwIfProcessAborted(requestId);
 
     const pageQuad = findLargestQuad(thresh, sourceCanvas.width * sourceCanvas.height);
     const ordered = orderCorners(pageQuad.points);
+    throwIfProcessAborted(requestId);
     const pageSizeLow = new cv.Size(
       Math.round(config.paperWidthIn * 100),
       Math.round(config.paperHeightIn * 100)
@@ -331,11 +581,13 @@ function runPipeline(sourceCanvas, adjustedCanvas, config) {
     );
     const pageWarpLow = perspectiveWarp(visionSrc, styledSrc, ordered, pageSizeLow);
     const pageWarpHigh = perspectiveWarp(visionSrc, styledSrc, ordered, pageSizeHigh);
+    throwIfProcessAborted(requestId);
 
     const lightnessLow = toLightnessGray(pageWarpLow.visionMat);
     const dotRectLow = findDotRect(lightnessLow);
     lightnessLow.delete();
     const dotRectHigh = scaleDotRect(dotRectLow, pageSizeLow, pageSizeHigh);
+    throwIfProcessAborted(requestId);
 
     const rectifiedSize = estimateRectifiedSize(dotRectHigh);
     const detectionPadding = estimateDetectionPadding(
@@ -358,6 +610,7 @@ function runPipeline(sourceCanvas, adjustedCanvas, config) {
       rectifiedSize,
       detectionPadding
     );
+    throwIfProcessAborted(requestId);
     const alignmentInfo = config.useCrossAlignment
       ? buildCrossAlignmentData(
           rectifiedWarp.visionMat,
@@ -374,11 +627,14 @@ function runPipeline(sourceCanvas, adjustedCanvas, config) {
           rectifiedWarp.gridBounds,
           config.crossRoiScale
         );
+    throwIfProcessAborted(requestId);
 
     const frames = sliceRectifiedToCanvases(
       rectifiedWarp.styledMat,
       alignmentInfo,
-      config.crop
+      config.crop,
+      getCvInterpolationFlag(config.exportOptions.resampling),
+      requestId
     );
     const rectifiedCanvas = matToCanvas(rectifiedWarp.styledMat);
 
@@ -407,7 +663,13 @@ function runPipeline(sourceCanvas, adjustedCanvas, config) {
     pageWarpHigh.visionMat.delete();
     pageWarpHigh.styledMat.delete();
 
-    return { frames, rectifiedCanvas, alignmentInfo, statusText };
+    return {
+      frames,
+      rectifiedCanvas,
+      alignmentInfo,
+      statusText,
+      pageQuadPoints: pageQuad.points,
+    };
   } finally {
     visionSrc.delete();
     styledSrc.delete();
@@ -416,7 +678,17 @@ function runPipeline(sourceCanvas, adjustedCanvas, config) {
   }
 }
 
-function estimatePaperThreshold(grayImg) {
+function estimatePaperThreshold(grayImg, method = "offset-peak", offset = -20) {
+  if (method === "otsu") {
+    const scratch = new cv.Mat();
+    try {
+      const otsu = cv.threshold(grayImg, scratch, 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU);
+      return Math.max(0, Math.min(255, Math.round(otsu + offset)));
+    } finally {
+      scratch.delete();
+    }
+  }
+
   const images = new cv.MatVector();
   const hist = new cv.Mat();
   images.push_back(grayImg);
@@ -425,7 +697,15 @@ function estimatePaperThreshold(grayImg) {
   const peakBin = (hist.rows > 1) ? maxLoc.y : maxLoc.x;
   images.delete();
   hist.delete();
-  return Math.max(0, peakBin - 20);
+  return Math.max(0, Math.min(255, peakBin + offset));
+}
+
+function throwIfProcessAborted(requestId) {
+  if (requestId !== state.processRequestId) {
+    const error = new Error("Processing aborted.");
+    error.name = "ProcessAbortedError";
+    throw error;
+  }
 }
 
 function findLargestQuad(binaryMat, totalArea) {
@@ -657,66 +937,203 @@ function rectifyByDots(pageVision, pageStyled, dotRect, size, padding = 0) {
   };
 }
 
-function sliceRectifiedToCanvases(rectifiedMat, extractionInfo, crop) {
+function getCvInterpolationFlag(mode) {
+  if (mode === "cubic" && typeof cv.INTER_CUBIC !== "undefined") {
+    return cv.INTER_CUBIC;
+  }
+  if (mode === "lanczos" && typeof cv.INTER_LANCZOS4 !== "undefined") {
+    return cv.INTER_LANCZOS4;
+  }
+  return cv.INTER_LINEAR;
+}
+
+function sliceRectifiedToCanvases(
+  rectifiedMat,
+  extractionInfo,
+  crop,
+  interpolation = cv.INTER_LINEAR,
+  requestId = state.processRequestId
+) {
   const frames = [];
   const cols = extractionInfo.cols;
   const rows = extractionInfo.rows;
-  const gridBounds = extractionInfo.gridBounds;
-  const cellWidth = gridBounds.width / cols;
-  const cellHeight = gridBounds.height / rows;
 
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
-      const nominalWidth = Math.max(1, cellWidth - crop.left - crop.right);
-      const nominalHeight = Math.max(1, cellHeight - crop.top - crop.bottom);
-      const outW = Math.max(1, Math.round(nominalWidth));
-      const outH = Math.max(1, Math.round(nominalHeight));
-      const quad = resolveFrameQuad(extractionInfo, col, row);
-      const u0 = crop.left / cellWidth;
-      const u1 = 1 - (crop.right / cellWidth);
-      const v0 = crop.top / cellHeight;
-      const v1 = 1 - (crop.bottom / cellHeight);
-      const srcTL = bilerpQuad(quad, u0, v0);
-      const srcTR = bilerpQuad(quad, u1, v0);
-      const srcBR = bilerpQuad(quad, u1, v1);
-      const srcBL = bilerpQuad(quad, u0, v1);
-      const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
-        srcTL.x, srcTL.y,
-        srcTR.x, srcTR.y,
-        srcBR.x, srcBR.y,
-        srcBL.x, srcBL.y,
-      ]);
-      const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
-        0, 0,
-        Math.max(0, outW - 1), 0,
-        Math.max(0, outW - 1), Math.max(0, outH - 1),
-        0, Math.max(0, outH - 1),
-      ]);
-      const perspective = cv.getPerspectiveTransform(srcPts, dstPts);
-      const patch = new cv.Mat();
-      cv.warpPerspective(
-        rectifiedMat,
-        patch,
-        perspective,
-        new cv.Size(outW, outH),
-        cv.INTER_LINEAR,
-        cv.BORDER_REPLICATE,
-        new cv.Scalar()
+      throwIfProcessAborted(requestId);
+      frames.push(
+        extractSingleFrameToCanvas(rectifiedMat, extractionInfo, col, row, crop, interpolation)
       );
-      frames.push(matToCanvas(patch));
-      srcPts.delete();
-      dstPts.delete();
-      perspective.delete();
-      patch.delete();
     }
   }
 
   return frames;
 }
 
+function extractSingleFrameToCanvas(rectifiedMat, extractionInfo, col, row, crop, interpolation) {
+  const gridBounds = extractionInfo.gridBounds;
+  const cellWidth = gridBounds.width / extractionInfo.cols;
+  const cellHeight = gridBounds.height / extractionInfo.rows;
+  const nominalWidth = Math.max(1, cellWidth - crop.left - crop.right);
+  const nominalHeight = Math.max(1, cellHeight - crop.top - crop.bottom);
+  const outW = Math.max(1, Math.round(nominalWidth));
+  const outH = Math.max(1, Math.round(nominalHeight));
+  const quad = resolveFrameQuad(extractionInfo, col, row);
+  const u0 = crop.left / cellWidth;
+  const u1 = 1 - (crop.right / cellWidth);
+  const v0 = crop.top / cellHeight;
+  const v1 = 1 - (crop.bottom / cellHeight);
+  const srcTL = bilerpQuad(quad, u0, v0);
+  const srcTR = bilerpQuad(quad, u1, v0);
+  const srcBR = bilerpQuad(quad, u1, v1);
+  const srcBL = bilerpQuad(quad, u0, v1);
+  const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+    srcTL.x, srcTL.y,
+    srcTR.x, srcTR.y,
+    srcBR.x, srcBR.y,
+    srcBL.x, srcBL.y,
+  ]);
+  const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+    0, 0,
+    Math.max(0, outW - 1), 0,
+    Math.max(0, outW - 1), Math.max(0, outH - 1),
+    0, Math.max(0, outH - 1),
+  ]);
+  const perspective = cv.getPerspectiveTransform(srcPts, dstPts);
+  const patch = new cv.Mat();
+
+  try {
+    cv.warpPerspective(
+      rectifiedMat,
+      patch,
+      perspective,
+      new cv.Size(outW, outH),
+      interpolation,
+      cv.BORDER_REPLICATE,
+      new cv.Scalar()
+    );
+    return matToCanvas(patch);
+  } finally {
+    srcPts.delete();
+    dstPts.delete();
+    perspective.delete();
+    patch.delete();
+  }
+}
+
 function renderRectifiedPreview(rectifiedCanvas) {
   const preview = dom.rectifiedCanvas;
   renderCanvasFit(rectifiedCanvas, preview);
+}
+
+function invalidateAppearanceCache() {
+  state.adjustedFrameCache.clear();
+  state.rectifiedPreviewCanvas = null;
+}
+
+function invalidateFrameCaches() {
+  state.frameCanvases = new Array(state.frameCount);
+  state.adjustedFrameCache.clear();
+}
+
+function hasAppearanceAdjustments(filters) {
+  return filters.brightness !== 0 || filters.contrast !== 0 || filters.vibrance !== 0;
+}
+
+function refreshAppearanceOutputs() {
+  if (!state.baseRectifiedCanvas) {
+    return;
+  }
+  const filters = readConfig().filters;
+  if (!hasAppearanceAdjustments(filters)) {
+    state.rectifiedPreviewCanvas = state.baseRectifiedCanvas;
+  } else {
+    applyVisualAdjustments(state.baseRectifiedCanvas, state.adjustedRectifiedCanvas, filters);
+    state.rectifiedPreviewCanvas = state.adjustedRectifiedCanvas;
+  }
+  renderRectifiedPreview(state.rectifiedPreviewCanvas);
+}
+
+function getAdjustedFrameCanvas(index) {
+  const baseFrame = getBaseFrameCanvas(index);
+  if (!baseFrame) {
+    return null;
+  }
+  const filters = readConfig().filters;
+  if (!hasAppearanceAdjustments(filters)) {
+    return baseFrame;
+  }
+  if (state.adjustedFrameCache.has(index)) {
+    return state.adjustedFrameCache.get(index);
+  }
+  const adjustedFrame = document.createElement("canvas");
+  applyVisualAdjustments(baseFrame, adjustedFrame, filters);
+  state.adjustedFrameCache.set(index, adjustedFrame);
+  return adjustedFrame;
+}
+
+function getBaseFrameCanvas(index) {
+  const cached = state.frameCanvases[index];
+  if (cached) {
+    return cached;
+  }
+  if (!state.baseRectifiedCanvas || !state.alignmentInfo) {
+    return null;
+  }
+
+  const rectifiedMat = cv.imread(state.baseRectifiedCanvas);
+  try {
+    const config = readConfig();
+    const cols = state.alignmentInfo.cols;
+    const col = index % cols;
+    const row = Math.floor(index / cols);
+    const frame = extractSingleFrameToCanvas(
+      rectifiedMat,
+      state.alignmentInfo,
+      col,
+      row,
+      config.crop,
+      getCvInterpolationFlag(config.exportOptions.resampling)
+    );
+    state.frameCanvases[index] = frame;
+    return frame;
+  } finally {
+    rectifiedMat.delete();
+  }
+}
+
+function renderRawPreview() {
+  renderCanvasFit(state.sourceCanvas, dom.rawCanvas);
+  if (!state.rawPageContour || state.rawPageContour.length !== 4) {
+    return;
+  }
+
+  const targetCanvas = dom.rawCanvas;
+  const sourceCanvas = state.sourceCanvas;
+  const ctx = targetCanvas.getContext("2d");
+  const scale = Math.min(targetCanvas.width / sourceCanvas.width, targetCanvas.height / sourceCanvas.height);
+  const drawW = sourceCanvas.width * scale;
+  const drawH = sourceCanvas.height * scale;
+  const offsetX = (targetCanvas.width - drawW) * 0.5;
+  const offsetY = (targetCanvas.height - drawH) * 0.5;
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(0, 255, 0, 0.5)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i < state.rawPageContour.length; i++) {
+    const pt = state.rawPageContour[i];
+    const x = offsetX + (pt.x * scale);
+    const y = offsetY + (pt.y * scale);
+    if (i === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.closePath();
+  ctx.stroke();
+  ctx.restore();
 }
 
 function renderCrossRoiGrid(alignmentInfo) {
@@ -759,12 +1176,12 @@ function renderCrossRoiGrid(alignmentInfo) {
 
 function startGifPreviewLoop() {
   const loop = (time) => {
-    if (state.frameCanvases.length > 0) {
+    if (state.frameCount > 0) {
       const fps = readConfig().fps;
       const frameDelay = 1000 / fps;
       if ((time - state.previewLastTime) >= frameDelay) {
         state.previewLastTime = time;
-        state.previewFrameIndex = (state.previewFrameIndex + 1) % state.frameCanvases.length;
+        state.previewFrameIndex = (state.previewFrameIndex + 1) % state.frameCount;
         drawCurrentGifPreview();
       }
     }
@@ -775,7 +1192,7 @@ function startGifPreviewLoop() {
 
 function drawCurrentGifPreview() {
   const previewCanvas = dom.gifPreviewCanvas;
-  const frame = state.frameCanvases[state.previewFrameIndex];
+  const frame = getAdjustedFrameCanvas(state.previewFrameIndex);
   if (!frame) {
     const ctx = previewCanvas.getContext("2d");
     resizeCanvasToBox(previewCanvas);
@@ -785,9 +1202,17 @@ function drawCurrentGifPreview() {
   renderCanvasFit(frame, previewCanvas);
 }
 
+function applyLiveAppearancePreview() {
+  drawCurrentGifPreview();
+}
+
+function clearLiveAppearancePreview() {
+  return;
+}
+
 function rerenderPreviews() {
   if (state.sourceImage) {
-    renderCanvasFit(state.sourceCanvas, dom.rawCanvas);
+    renderRawPreview();
   }
   if (state.rectifiedPreviewCanvas) {
     renderRectifiedPreview(state.rectifiedPreviewCanvas);
@@ -796,36 +1221,45 @@ function rerenderPreviews() {
 }
 
 async function exportGif() {
-  if (!state.frameCanvases.length) return;
+  if (!state.frameCount) return;
 
   dom.exportButton.disabled = true;
   setStatus("Encoding GIF…");
 
   const fps = readConfig().fps;
+  const exportOptions = readConfig().exportOptions;
+  const firstFrame = getAdjustedFrameCanvas(0);
+  if (!firstFrame) {
+    dom.exportButton.disabled = false;
+    return;
+  }
   const gif = new GIF({
     workers: 2,
-    quality: 10,
-    width: state.frameCanvases[0].width,
-    height: state.frameCanvases[0].height,
+    quality: exportOptions.quality,
+    width: firstFrame.width,
+    height: firstFrame.height,
     repeat: 0,
+    dither: exportOptions.dither,
+    globalPalette: exportOptions.globalPalette,
     workerScript: "../plottimation_GIF_generator/gif.worker.js",
   });
 
   const delay = Math.max(1, Math.round(1000 / fps));
-  for (const frame of state.frameCanvases) {
+  for (let i = 0; i < state.frameCount; i++) {
+    const frame = getAdjustedFrameCanvas(i);
     gif.addFrame(frame, { copy: true, delay });
   }
 
   gif.on("finished", (blob) => {
     revokeGifUrl();
-    state.exportedGifFilename = makeGifFilename(state.sourceFilename);
+    state.exportedGifFilename = makeGifFilename(state.sourceFilename, exportOptions.quality);
     state.exportedGifUrl = URL.createObjectURL(blob);
     dom.gifImage.src = state.exportedGifUrl;
     dom.gifImage.classList.remove("hidden");
     dom.gifImage.hidden = false;
     downloadBlobWithFilename(blob, state.exportedGifFilename);
     dom.exportButton.disabled = false;
-    setStatus("GIF ready.\nFrame count: " + state.frameCanvases.length);
+    setStatus("GIF ready.\nFrame count: " + state.frameCount);
   });
 
   gif.on("progress", (progress) => {
@@ -845,7 +1279,7 @@ function revokeGifUrl() {
   dom.gifImage.removeAttribute("src");
 }
 
-function makeGifFilename(sourceFilename) {
+function makeGifFilename(sourceFilename, quality = 10) {
   const base = sanitizeFilenameBase(sourceFilename || "frame_sheet");
   const now = new Date();
   const yyyy = now.getFullYear();
@@ -854,7 +1288,7 @@ function makeGifFilename(sourceFilename) {
   const hh = String(now.getHours()).padStart(2, "0");
   const mi = String(now.getMinutes()).padStart(2, "0");
   const ss = String(now.getSeconds()).padStart(2, "0");
-  return `${base}_animation_${yyyy}${mm}${dd}_${hh}${mi}${ss}.gif`;
+  return `${base}_anim_${yyyy}${mm}${dd}_${hh}${mi}${ss}_q${quality}.gif`;
 }
 
 function sanitizeFilenameBase(filename) {
@@ -894,7 +1328,7 @@ function buildStatusText({
   const lines = [
     "Raw photo: " + rawWidth + " x " + rawHeight,
     "Paper threshold: " + threshVal + "/255",
-    "Largest contour area: " + pageAreaPct.toFixed(3),
+    "Largest contour area: " + (pageAreaPct * 100).toFixed(1) + "%",
     "Detection warp: " + pageWarpWidth + " x " + pageWarpHeight,
     "Extraction warp: " + highPageWarpWidth + " x " + highPageWarpHeight,
     "Rectified sheet: " + rectifiedWidth + " x " + rectifiedHeight,
@@ -933,15 +1367,131 @@ function applyVisualAdjustments(sourceCanvas, targetCanvas, filters) {
   targetCanvas.width = sourceCanvas.width;
   targetCanvas.height = sourceCanvas.height;
   const ctx = targetCanvas.getContext("2d");
-  ctx.save();
   ctx.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
-  ctx.filter = [
-    `brightness(${100 + filters.brightness}%)`,
-    `contrast(${100 + filters.contrast}%)`,
-    `saturate(${100 + filters.saturation}%)`,
-  ].join(" ");
   ctx.drawImage(sourceCanvas, 0, 0);
-  ctx.restore();
+  if (
+    filters.brightness === 0 &&
+    filters.contrast === 0 &&
+    filters.vibrance === 0
+  ) {
+    return;
+  }
+
+  applyOklabAppearanceAdjustments(targetCanvas, filters);
+}
+
+function mapVibranceSliderToAmount(vibranceValue) {
+  const normalized = Math.max(-1, Math.min(1, vibranceValue / 100));
+  return normalized * 1.6;
+}
+
+function applyOklabAppearanceAdjustments(canvas, filters) {
+  const ctx = canvas.getContext("2d");
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  const deltaL = mapBrightnessSliderToDeltaL(filters.brightness);
+  const contrastK = mapContrastSliderToCurveStrength(filters.contrast);
+  const vibranceAmount = mapVibranceSliderToAmount(filters.vibrance);
+
+  for (let i = 0; i < data.length; i += 4) {
+    const oklab = srgbToOklab(
+      data[i] / 255,
+      data[i + 1] / 255,
+      data[i + 2] / 255
+    );
+    let L = Math.max(0, Math.min(1, oklab.L + deltaL));
+    L = applyMidpointSCurve(L, contrastK);
+
+    const chroma = Math.hypot(oklab.a, oklab.b);
+    const adaptive = 1 - Math.max(0, Math.min(1, chroma / 0.32));
+    const chromaScale = Math.max(0, 1 + (vibranceAmount * adaptive));
+    const adjusted = oklabToSrgb(L, oklab.a * chromaScale, oklab.b * chromaScale);
+
+    data[i] = Math.round(adjusted[0] * 255);
+    data[i + 1] = Math.round(adjusted[1] * 255);
+    data[i + 2] = Math.round(adjusted[2] * 255);
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+}
+
+function mapBrightnessSliderToDeltaL(brightnessValue) {
+  const normalized = Math.max(-1, Math.min(1, brightnessValue / 100));
+  return normalized * 0.28;
+}
+
+function mapContrastSliderToCurveStrength(contrastValue) {
+  const normalized = Math.max(-1, Math.min(1, contrastValue / 100));
+  return normalized * 5.5;
+}
+
+function applyMidpointSCurve(value, k) {
+  if (Math.abs(k) < 1e-6) {
+    return value;
+  }
+  const strength = Math.abs(k);
+  const centered = value - 0.5;
+  const tanhHalf = Math.tanh(0.5 * strength);
+  if (Math.abs(tanhHalf) < 1e-6) {
+    return value;
+  }
+
+  let curved;
+  if (k > 0) {
+    curved = 0.5 + (Math.tanh(centered * strength) / (2 * tanhHalf));
+  } else {
+    const scaled = Math.max(-0.999999, Math.min(0.999999, (2 * centered) * tanhHalf));
+    curved = 0.5 + (Math.atanh(scaled) / strength);
+  }
+
+  return Math.max(0, Math.min(1, curved));
+}
+
+function srgbToOklab(r, g, b) {
+  const lr = srgbToLinear(r);
+  const lg = srgbToLinear(g);
+  const lb = srgbToLinear(b);
+
+  const l = Math.cbrt((0.4122214708 * lr) + (0.5363325363 * lg) + (0.0514459929 * lb));
+  const m = Math.cbrt((0.2119034982 * lr) + (0.6806995451 * lg) + (0.1073969566 * lb));
+  const s = Math.cbrt((0.0883024619 * lr) + (0.2817188376 * lg) + (0.6299787005 * lb));
+
+  return {
+    L: (0.2104542553 * l) + (0.7936177850 * m) - (0.0040720468 * s),
+    a: (1.9779984951 * l) - (2.4285922050 * m) + (0.4505937099 * s),
+    b: (0.0259040371 * l) + (0.7827717662 * m) - (0.8086757660 * s),
+  };
+}
+
+function oklabToSrgb(L, a, b) {
+  const l = Math.pow(L + (0.3963377774 * a) + (0.2158037573 * b), 3);
+  const m = Math.pow(L - (0.1055613458 * a) - (0.0638541728 * b), 3);
+  const s = Math.pow(L - (0.0894841775 * a) - (1.2914855480 * b), 3);
+
+  const r = linearToSrgb((4.0767416621 * l) - (3.3077115913 * m) + (0.2309699292 * s));
+  const g = linearToSrgb((-1.2684380046 * l) + (2.6097574011 * m) - (0.3413193965 * s));
+  const blue = linearToSrgb((-0.0041960863 * l) - (0.7034186147 * m) + (1.7076147010 * s));
+
+  return [
+    Math.max(0, Math.min(1, r)),
+    Math.max(0, Math.min(1, g)),
+    Math.max(0, Math.min(1, blue)),
+  ];
+}
+
+function srgbToLinear(value) {
+  if (value <= 0.04045) {
+    return value / 12.92;
+  }
+  return Math.pow((value + 0.055) / 1.055, 2.4);
+}
+
+function linearToSrgb(value) {
+  const clamped = Math.max(0, value);
+  if (clamped <= 0.0031308) {
+    return 12.92 * clamped;
+  }
+  return (1.055 * Math.pow(clamped, 1 / 2.4)) - 0.055;
 }
 
 function renderCanvasFit(sourceCanvas, targetCanvas) {
