@@ -1,34 +1,35 @@
 # Plottimation Tool
 
-## Purpose
+This tool builds an animated GIF from a photo or scan of a plotted frame-sheet.<br/>
+Version 1.0 • March 2026 • By Golan Levin
 
-This is a browser-based desktop tool for producing an animated GIF from a photograph or scan of an animation frame-sheet.
+![plottimation_ui.png](doc/plottimation_ui.png)
 
-The source sheet contains:
+## How To Use It
 
-- a regular grid of animation frames
-- 4 corner registration circles
-- interior `+` registration marks
-
-The tool:
-
-1. loads a photo or scan of the sheet
-2. finds and rectifies the page
-3. finds the corner dots
-4. rectifies to the dot-defined sheet coordinate system
-5. optionally refines frame geometry with the interior `+` marks
-6. previews the animation
-7. exports an animated GIF
+1. Open `plottimation_webtool/index.html` in a browser.
+2. Drag in a photo or scan of your plotted sheet, or click `Load Demo`.
+3. Set `Frame Columns` and `Frame Rows` to match your layout.
+4. Choose the correct paper size.
+5. If needed, adjust detection, appearance, crop, or export settings.
+6. Review the `Animation Preview`.
+7. Click `Export GIF` to generate and download the final GIF.
 
 ---
 
-## To Do
+## Preparing A Good Input Image
 
-* Mobile-friendly (responsive) interface
-* Handle light-on-dark animations on black paper.
-* Use cross-only CV pipeline
-* Deal with portrait/landscape
-* Deal with multiple pages
-* Memory consumption report
-* Documentation screenrecording video
+Your sheet should:
 
+- be photographed or scanned in landscape orientation
+- show the entire page
+- be surrounded by a darker background 
+- contain a complete grid of small, dark, regularly-spaced `+` crosses separating the frames of your animation
+
+Those small crosses are important. They define the frame grid and are used for alignment. See [this example image](demo/mySrcImage.jpg):
+
+<img src="demo/mySrcImage.jpg" width="475" height="378">
+
+## An Example Output
+
+![plottimation_ui.png](doc/mySrcImage_anim_20260315_103518_q10.gif)

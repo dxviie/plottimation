@@ -79,11 +79,23 @@ select {
 }
 
 .lede {
-  margin: 6px 0 0;
+  position: relative;
+  top: 4px;
+  margin: 3px 0 0;
   font-size: 0.82rem;
   color: var(--muted);
-  line-height: 1.2;
+  line-height: 1.05;
   white-space: nowrap;
+}
+
+.drop-note {
+  font-size: 0.82rem;
+  line-height: 1.05;
+  color: var(--muted);
+}
+
+.drop-lead:last-of-type {
+  margin-bottom: 6px;
 }
 
 .control-group {
@@ -176,6 +188,18 @@ select {
   color: var(--muted);
 }
 
+.slider-stack > label > span {
+  position: relative;
+  top: 4px;
+  margin-bottom: -4px;
+}
+
+.stack-label > span {
+  position: relative;
+  top: 2px;
+  margin-bottom: -2px;
+}
+
 output {
   margin-left: 8px;
   font: 0.8rem/1 var(--mono);
@@ -263,6 +287,22 @@ button:disabled {
 button:hover:not(:disabled),
 .download-link:hover {
   transform: translateY(-1px);
+}
+
+.button-ring {
+  animation: button-ring 0.82s ease-in-out;
+  transform-origin: 50% 50%;
+}
+
+@keyframes button-ring {
+  0% { transform: scale(1) rotate(0deg); }
+  12% { transform: scale(1.06) rotate(-5deg); }
+  24% { transform: scale(1.1) rotate(5deg); }
+  36% { transform: scale(1.08) rotate(-4deg); }
+  48% { transform: scale(1.06) rotate(4deg); }
+  60% { transform: scale(1.04) rotate(-3deg); }
+  72% { transform: scale(1.02) rotate(2deg); }
+  100% { transform: scale(1) rotate(0deg); }
 }
 
 .toggle {

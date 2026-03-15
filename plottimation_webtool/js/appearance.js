@@ -1,11 +1,11 @@
 /**
  * Report whether any appearance controls require a non-identity color pass.
  *
- * @param {{brightness:number, contrast:number, vibrance:number, invert:boolean}} filters
+ * @param {{brightness:number, contrast:number, vibrance:number, temperature:number, invert:boolean}} filters
  * @returns {boolean}
  */
 export function hasAppearanceAdjustments(filters) {
-  return filters.brightness !== 0 || filters.contrast !== 0 || filters.vibrance !== 0 || filters.invert;
+  return filters.brightness !== 0 || filters.contrast !== 0 || filters.vibrance !== 0 || filters.temperature !== 0 || filters.invert;
 }
 
 /**
@@ -14,7 +14,7 @@ export function hasAppearanceAdjustments(filters) {
  *
  * @param {HTMLCanvasElement} sourceCanvas
  * @param {HTMLCanvasElement} targetCanvas
- * @param {{brightness:number, contrast:number, vibrance:number, invert:boolean}} filters
+ * @param {{brightness:number, contrast:number, vibrance:number, temperature:number, invert:boolean}} filters
  * @returns {void}
  */
 export function applyVisualAdjustments(sourceCanvas, targetCanvas, filters) {
@@ -41,11 +41,23 @@ function mapVibranceSliderToAmount(vibranceValue) {
 }
 
 /**
+ * Map the color-temperature slider into a mired white-balance offset.
+ *
+ * @param {number} temperatureValue
+ * @returns {number}
+ */
+function mapTemperatureSliderToMiredShift(temperatureValue) {
+  const normalized = Math.max(-1, Math.min(1, temperatureValue / 100));
+  return normalized * 60;
+}
+
+/**
  * Apply the full appearance stack in a single OKLab pass:
- * brightness on L, contrast on L, vibrance on chroma, then optional RGB inversion.
+ * brightness on L, contrast on L, vibrance on chroma, then white-balance adaptation
+ * and optional RGB inversion.
  *
  * @param {HTMLCanvasElement} canvas
- * @param {{brightness:number, contrast:number, vibrance:number, invert:boolean}} filters
+ * @param {{brightness:number, contrast:number, vibrance:number, temperature:number, invert:boolean}} filters
  * @returns {void}
  */
 function applyOklabAppearanceAdjustments(canvas, filters) {
@@ -55,8 +67,14 @@ function applyOklabAppearanceAdjustments(canvas, filters) {
   const deltaL = mapBrightnessSliderToDeltaL(filters.brightness);
   const contrastK = mapContrastSliderToCurveStrength(filters.contrast);
   const vibranceAmount = mapVibranceSliderToAmount(filters.vibrance);
+  const temperatureMiredShift = mapTemperatureSliderToMiredShift(filters.temperature);
+  const adaptation = Math.abs(temperatureMiredShift) > 1e-6
+    ? makeTemperatureAdaptation(temperatureMiredShift)
+    : null;
 
   for (let i = 0; i < data.length; i += 4) {
+    // Do the perceptual edits in OKLab first, then return to sRGB for a white-balance style
+    // chromatic adaptation pass that behaves more like a real temperature adjustment.
     const oklab = srgbToOklab(
       data[i] / 255,
       data[i + 1] / 255,
@@ -69,10 +87,13 @@ function applyOklabAppearanceAdjustments(canvas, filters) {
     const adaptive = 1 - Math.max(0, Math.min(1, chroma / 0.32));
     const chromaScale = Math.max(0, 1 + (vibranceAmount * adaptive));
     const adjusted = oklabToSrgb(lightness, oklab.a * chromaScale, oklab.b * chromaScale);
+    const adapted = adaptation
+      ? adaptSrgbTemperature(adjusted[0], adjusted[1], adjusted[2], adaptation)
+      : adjusted;
 
-    let r = Math.round(adjusted[0] * 255);
-    let g = Math.round(adjusted[1] * 255);
-    let b = Math.round(adjusted[2] * 255);
+    let r = Math.round(adapted[0] * 255);
+    let g = Math.round(adapted[1] * 255);
+    let b = Math.round(adapted[2] * 255);
     if (filters.invert) {
       r = 255 - r;
       g = 255 - g;
@@ -211,4 +232,150 @@ function linearToSrgb(value) {
     return 12.92 * clamped;
   }
   return (1.055 * Math.pow(clamped, 1 / 2.4)) - 0.055;
+}
+
+const SRGB_TO_XYZ = [
+  [0.4124564, 0.3575761, 0.1804375],
+  [0.2126729, 0.7151522, 0.0721750],
+  [0.0193339, 0.1191920, 0.9503041],
+];
+
+const XYZ_TO_SRGB = [
+  [3.2404542, -1.5371385, -0.4985314],
+  [-0.9692660, 1.8760108, 0.0415560],
+  [0.0556434, -0.2040259, 1.0572252],
+];
+
+const BRADFORD = [
+  [0.8951, 0.2664, -0.1614],
+  [-0.7502, 1.7135, 0.0367],
+  [0.0389, -0.0685, 1.0296],
+];
+
+const BRADFORD_INV = [
+  [0.9869929, -0.1470543, 0.1599627],
+  [0.4323053, 0.5183603, 0.0492912],
+  [-0.0085287, 0.0400428, 0.9684867],
+];
+
+/**
+ * Build a Bradford chromatic-adaptation transform that shifts D65 toward a warmer or cooler white.
+ *
+ * @param {number} miredShift
+ * @returns {{matrix:number[][]}}
+ */
+function makeTemperatureAdaptation(miredShift) {
+  const sourceWhite = xyzFromCctKelvin(6504);
+  const targetKelvin = clampKelvin(1e6 / ((1e6 / 6504) + miredShift));
+  const targetWhite = xyzFromCctKelvin(targetKelvin);
+  // Bradford adaptation remaps colors as though the scene illuminant, not the pigments themselves, changed.
+  return { matrix: buildBradfordAdaptationMatrix(sourceWhite, targetWhite) };
+}
+
+/**
+ * Apply a chromatic-adaptation matrix to one sRGB color.
+ *
+ * @param {number} r
+ * @param {number} g
+ * @param {number} b
+ * @param {{matrix:number[][]}} adaptation
+ * @returns {[number, number, number]}
+ */
+function adaptSrgbTemperature(r, g, b, adaptation) {
+  // Temperature adaptation operates in linear-light XYZ/LMS space to avoid the hue shifts
+  // that would come from simply nudging RGB channels directly.
+  const linear = [srgbToLinear(r), srgbToLinear(g), srgbToLinear(b)];
+  const xyz = multiplyMat3Vec3(SRGB_TO_XYZ, linear);
+  const adaptedXyz = multiplyMat3Vec3(adaptation.matrix, xyz);
+  const adaptedLinear = multiplyMat3Vec3(XYZ_TO_SRGB, adaptedXyz);
+  return [
+    Math.max(0, Math.min(1, linearToSrgb(adaptedLinear[0]))),
+    Math.max(0, Math.min(1, linearToSrgb(adaptedLinear[1]))),
+    Math.max(0, Math.min(1, linearToSrgb(adaptedLinear[2]))),
+  ];
+}
+
+/**
+ * Approximate a daylight white point from correlated color temperature.
+ *
+ * @param {number} kelvin
+ * @returns {[number, number, number]}
+ */
+function xyzFromCctKelvin(kelvin) {
+  const T = clampKelvin(kelvin);
+  const x = (T <= 7000)
+    ? (-4.6070e9 / (T ** 3)) + (2.9678e6 / (T ** 2)) + (99.11 / T) + 0.244063
+    : (-2.0064e9 / (T ** 3)) + (1.9018e6 / (T ** 2)) + (247.48 / T) + 0.237040;
+  const y = (-3 * x * x) + (2.87 * x) - 0.275;
+  return [x / y, 1, (1 - x - y) / y];
+}
+
+/**
+ * Build a Bradford adaptation matrix between two XYZ white points.
+ *
+ * @param {[number, number, number]} sourceWhite
+ * @param {[number, number, number]} targetWhite
+ * @returns {number[][]}
+ */
+function buildBradfordAdaptationMatrix(sourceWhite, targetWhite) {
+  const srcCone = multiplyMat3Vec3(BRADFORD, sourceWhite);
+  const dstCone = multiplyMat3Vec3(BRADFORD, targetWhite);
+  const scale = [
+    [dstCone[0] / srcCone[0], 0, 0],
+    [0, dstCone[1] / srcCone[1], 0],
+    [0, 0, dstCone[2] / srcCone[2]],
+  ];
+  return multiplyMat3(BRADFORD_INV, multiplyMat3(scale, BRADFORD));
+}
+
+/**
+ * Multiply two 3x3 matrices.
+ *
+ * @param {number[][]} a
+ * @param {number[][]} b
+ * @returns {number[][]}
+ */
+function multiplyMat3(a, b) {
+  return [
+    [
+      (a[0][0] * b[0][0]) + (a[0][1] * b[1][0]) + (a[0][2] * b[2][0]),
+      (a[0][0] * b[0][1]) + (a[0][1] * b[1][1]) + (a[0][2] * b[2][1]),
+      (a[0][0] * b[0][2]) + (a[0][1] * b[1][2]) + (a[0][2] * b[2][2]),
+    ],
+    [
+      (a[1][0] * b[0][0]) + (a[1][1] * b[1][0]) + (a[1][2] * b[2][0]),
+      (a[1][0] * b[0][1]) + (a[1][1] * b[1][1]) + (a[1][2] * b[2][1]),
+      (a[1][0] * b[0][2]) + (a[1][1] * b[1][2]) + (a[1][2] * b[2][2]),
+    ],
+    [
+      (a[2][0] * b[0][0]) + (a[2][1] * b[1][0]) + (a[2][2] * b[2][0]),
+      (a[2][0] * b[0][1]) + (a[2][1] * b[1][1]) + (a[2][2] * b[2][1]),
+      (a[2][0] * b[0][2]) + (a[2][1] * b[1][2]) + (a[2][2] * b[2][2]),
+    ],
+  ];
+}
+
+/**
+ * Multiply a 3x3 matrix by a 3-vector.
+ *
+ * @param {number[][]} matrix
+ * @param {[number, number, number]} vector
+ * @returns {[number, number, number]}
+ */
+function multiplyMat3Vec3(matrix, vector) {
+  return [
+    (matrix[0][0] * vector[0]) + (matrix[0][1] * vector[1]) + (matrix[0][2] * vector[2]),
+    (matrix[1][0] * vector[0]) + (matrix[1][1] * vector[1]) + (matrix[1][2] * vector[2]),
+    (matrix[2][0] * vector[0]) + (matrix[2][1] * vector[1]) + (matrix[2][2] * vector[2]),
+  ];
+}
+
+/**
+ * Clamp correlated color temperature to a conservative usable range.
+ *
+ * @param {number} kelvin
+ * @returns {number}
+ */
+function clampKelvin(kelvin) {
+  return Math.max(2500, Math.min(25000, kelvin));
 }

@@ -2,166 +2,464 @@
 
 ## Purpose
 
-`plottimation_webtool/` is a browser-based desktop tool for producing an animated GIF from a photograph or scan of a plotted animation frame-sheet.
+`plottimation_webtool/` is a browser-based desktop tool that builds an animated GIF from a photograph or scan of a plotted animation frame-sheet.
 
-The source sheet contains:
+The intended workflow is:
 
-- a regular grid of animation frames
-- 4 corner registration circles
-- interior `+` registration marks
+1. User loads a photo or scan of a plotted sheet.
+2. App detects the paper quadrilateral in the raw image.
+3. App rectifies the full page.
+4. App detects the frame-grid region inside that rectified page.
+5. App detects the registration crosses on the grid.
+6. App extracts each animation frame with subpixel geometric correction.
+7. App previews the animation.
+8. App exports an animated GIF.
 
-The tool:
+This tool is the current browser successor to the older `plottimation_GIF_generator/` p5/OpenCV sketch.
 
-1. loads a photo or scan of the sheet
-2. finds and rectifies the page
-3. finds the corner dots
-4. rectifies to the dot-defined sheet coordinate system
-5. optionally refines frame geometry with the interior `+` marks
-6. previews the animation
-7. exports an animated GIF
+## Current registration-mark assumption
 
-This tool is a friendlier successor to `plottimation_GIF_generator/`.
+This is important because the project used to be different.
+
+Current assumption:
+
+- the frame-sheet uses a complete `(cols + 1) x (rows + 1)` lattice of small dark `+` crosses
+- the four outer frame-grid corners are crosses too
+- there are no special corner circles in the current preferred pipeline
+- the areas above, below, left, and right of the frame grid are expected to be blank-ish paper with low variance
+
+Legacy assumption still preserved in code:
+
+- old sheets had 4 circular corner markers plus interior `+` marks
+- the old detector used a tuned "dip + gutter" system to find those circles
+
+The new default path is the all-cross pipeline. The old circle-based path is still kept in `js/pipeline.js` with `_old` helpers for reference / fallback.
 
 ## Related directories
 
 - `grid-animation-svg-generator/`
-  Generates plotted frame-sheets and registration graphics.
+  Generates plotted frame sheets.
 - `plottimation_GIF_generator/`
-  Original p5.js/OpenCV sketch that inspired this app.
+  Older p5.js/OpenCV proof-of-concept.
 - `plottimation_webtool/`
-  Current HTML/CSS/JS application.
+  Current tool.
 
-## Core design constraints
+Useful demo assets inside `plottimation_webtool/demo/`:
 
-- The GIF tool should know as little as possible about the exact sheet design.
-- It should depend primarily on:
-  - frame columns
-  - frame rows
-  - sheet aspect ratio
-- It should infer the marker lattice from equal spacing over the rectified sheet.
-- It should not depend on exact plot margins, dot sizes, SVG generator constants, etc.
-- Desktop browser only. Mobile is not a target.
-- No p5.js in this tool.
+- `mySrcImage.jpg`
+  Main demo photo for the current all-cross format.
+- `convolved-rectified-sheet.png`
+  Ground-truth style reference for the cross-kernel convolution.
+- `left-sweep.tsv`
+  Recorded left-edge 1D profile data used to tune boundary threshold/persistence.
+- `profile.png`
+  ImageJ chart of the left-edge profile.
+- `debug.png`
+  Screenshot of the rectified-page convolution view with detection overlay.
 
-## Main files
+## Architecture summary
+
+The app is now modularized. Main files:
 
 - `plottimation_webtool/index.html`
-  UI structure.
+  UI structure and DOM IDs.
 - `plottimation_webtool/style.css`
-  layout and styling.
-- `plottimation_webtool/app.js`
-  app logic, CV pipeline, preview logic, GIF export.
-- `plottimation_webtool/opencv.js`
-  local OpenCV.js runtime.
-- `plottimation_webtool/gif.js`
-  GIF encoder library.
-- `plottimation_webtool/demo/mySrcImage.jpg`
-  demo image loaded by the `Load Demo` button.
+  Layout and styling.
+- `plottimation_webtool/js/app.js`
+  Main controller: UI wiring, config reading, caching, preview rendering, GIF export, tooltip system.
+- `plottimation_webtool/js/dom-state.js`
+  DOM handles, paper presets, grouped shared state.
+- `plottimation_webtool/js/appearance.js`
+  Appearance adjustments: OKLab brightness/contrast/vibrance, Bradford temperature adaptation, invert.
+- `plottimation_webtool/js/canvas-view.js`
+  Canvas fit/draw/resize helpers.
+- `plottimation_webtool/js/pipeline.js`
+  CV pipeline: page detection, rectification, cross-only coarse detector, cross alignment, frame extraction.
+- `plottimation_webtool/js/gif.js`
+  Main-thread GIF API.
+- `plottimation_webtool/js/gif.worker.js`
+  Worker used by `gif.js` for encoding. This file contains a local patch for a serpentine-dithering bug.
+- `plottimation_webtool/js/opencv.js`
+  Local OpenCV.js runtime.
 
-## Current UI
+## High-level pipeline
 
-### Header
+### 1. Load source image
 
-- Title: `Plottimation Tool`
-- Subtitle line 1: `Build an animated GIF from a photo of a frame-sheet.`
-- Subtitle line 2: `v.1.0 • Golan Levin, 3/2026`
+The user can:
 
-### Sidebar panels
+- drag/drop a file
+- choose a file from disk
+- click `Load Demo` to load `demo/mySrcImage.jpg`
 
-1. `Photo`
-   - drag/drop zone
-   - file picker
-   - skinny `Load Demo` button
+The source image is loaded into:
 
-2. `Layout`
-   - `Frame Columns`
-   - `Frame Rows`
-   - `Paper Size (Landscape)` preset menu
-   - `Custom` width/height fields only visible when preset is `Custom`
+- `state.source.image`
+- `state.source.filename`
+- `state.source.canvas`
 
-3. `Detection & Alignment`
-   - `Thresholding Method`
-     - `Offset Peak`
-     - `Otsu`
-   - `Thresholding Offset`
-   - `Cross Region Size`
-   - `Use cross-based subpixel alignment`
-   - `Use rectified as source`
+`state.source.canvas` is the full-resolution raw source canvas. Preview canvases are separate and smaller.
 
-4. `Appearance`
-   - skinny `Reset` button in subpanel summary
-   - `Brightness`
-   - `Contrast`
-   - `Vibrance`
-   - `Resampling`
+### 2. Detect the paper in the raw photo
 
-5. `Trim Output`
-   - skinny `Reset` button in subpanel summary
-   - crop left/right/top/bottom
+Implemented in `js/pipeline.js` `runPipeline(...)`.
 
-6. `GIF Export Options`
-   - `Frame Rate`
-   - `Encoding Quality (lower is better)`
-   - `Dithering`
-   - `Use Global Palette`
+Steps:
 
-7. `Status`
-   - multiline text diagnostics
+1. Convert raw photo to grayscale.
+2. Estimate a threshold using:
+   - `Offset Peak`, or
+   - `Otsu`
+3. Apply threshold to segment bright paper from darker surroundings.
+4. Find the largest external contour.
+5. Approximate it to 4 points.
+6. Order the corners.
 
-### Main viewer panels
+The detected page contour is drawn on the `Raw Photo` panel as a semi-transparent lime quad.
 
-- `Raw Photo`
-  - shows uploaded image
-  - header shows source filename in parentheses
-  - overlays detected page contour in semi-transparent lime
+### 3. Build page warps
 
-- `Rectified Sheet`
-  - shows the final rectified sheet preview
+Two page warps are still used:
 
-- `Cross Regions`
-  - shows ROI tiles around expected interior `+` positions
-  - grid is `(cols + 1) x (rows + 1)` with dotted placeholders for the 4 corner-dot slots
+- `Detection warp`
+  fixed at `paperWidth * 100` by `paperHeight * 100`
+  This stable lower-resolution warp was kept because the old corner-dot logic was scale-sensitive.
 
-- `Animation Preview`
-  - animated preview canvas
-  - skinny `Export GIF` button in header
-  - exported GIF image appears only after export
+- `Extraction warp`
+  estimated from the raw page-quad area so it preserves more source detail than the fixed `*100` heuristic
 
-## Visual style
+The app currently still computes both, even though the cross-only detector is the preferred path.
 
-- neutral gray
-- built-in browser fonts
-- minimal styling
-- subtle stripe background in preview stages before any image is loaded
-- plain light gray stage background after an image is loaded
-- collapsible subpanels use large `▶` / `▼` disclosure glyphs
-- `Reset` buttons are normal weight, not bold
+The `Rectified Sheet` panel does **not** show the final extracted frame grid by default. It shows the full rectified page, with overlays.
 
-## Important UX behavior
+### 4. Detect the frame-grid region inside the rectified page
 
-- processing is automatic after image load
-- there is no `Process Photo` button
-- any relevant control change revokes and hides any previously exported GIF
-- exported GIF preview should not remain visible if controls change
-- the visible preview canvases are panel-sized previews only, not the data used internally for CV/export
-- dragging `Raw Photo` or `Rectified Sheet` out uses full-resolution backing canvases
-- dragging exported GIF out should preserve the friendly filename
+This is the newest major change.
 
-## Current filename behavior
+Current default path:
 
-Exported GIF filenames now look like:
+- `bUseCrossOnlyGridDetection = true` in `js/pipeline.js`
 
-- `<sanitized_base>_anim_YYYYMMDD_HHMMSS_q10.gif`
+Current algorithm:
+
+1. Take the already-rectified full page.
+2. Convert it to grayscale with **no blur**.
+3. Trim inward by `Search Inset Margin`.
+   This avoids paper-edge contamination from dark background encroaching around curled paper edges.
+4. Convolve the trimmed grayscale page with a custom unnormalized 25x25 `crossKernel`.
+5. Clamp the convolution response:
+   - negative values -> `0`
+   - values above `255` -> `255`
+6. Compute 1D average-response profiles:
+   - one per column
+   - one per row
+7. From left/right/top/bottom, find the first sustained run above:
+   - `Boundary Threshold`
+   - for `Boundary Persistence` consecutive pixels
+8. Use those first threshold crossings directly as the coarse frame-grid bounds.
+
+Important:
+
+- there is **no peak-refinement step anymore**
+- there is **no extra outward padding step** in the coarse detector anymore
+- the red overlay in `Rectified Sheet` now reflects those direct threshold crossings
+
+The old circle-based detector still exists as:
+
+- `buildFrameGridRectification_old(...)`
+- `findDotRect_old(...)`
+- `estimateRectifiedSize_old(...)`
+- `rectifyByDots_old(...)`
+
+But the active path is:
+
+- `buildFrameGridRectification_fromCrosses(...)`
+- `findFrameGridQuadFromCrosses(...)`
+
+### 5. Rectify the coarse frame-grid region
+
+After the coarse frame-grid quad is found, the app rectifies that quad into working coordinates using `rectifyByQuad(...)`.
+
+Important details:
+
+- border mode is `cv.BORDER_REPLICATE`
+- this is deliberate so cross ROIs at the outer edges remain centered and valid
+- downstream cross detection uses the resulting rectified grid image
+
+This rectified-grid image is what frame extraction operates on.
+
+### 6. Detect cross centers
+
+After coarse rectification:
+
+- if `Use cross-based subpixel alignment` is enabled:
+  - the app refines actual cross centers from square ROIs around each expected lattice point
+- if disabled:
+  - the app does **not** refine cross positions
+  - it still builds and shows cross-region diagnostics centered on the nominal lattice positions
+
+Important behaviors:
+
+- cross-region ROIs are square
+- edge/corner ROIs remain centered because the rectified grid has detection padding and replicated borders
+- in the current all-cross mode, the corner tiles are real cross tiles too
+- when alignment is disabled, the Cross Regions panel still shows the regions, but the red crosshair sits at the nominal center and no accepted/rejected hover text is shown
+
+The alignment data object contains:
+
+- rectified dimensions
+- grid bounds
+- detected marker data
+- ROI tile canvases for the `Cross Regions` panel
+- whether corner crosses are included
+
+In all-cross mode, after cross detection:
+
+- `refineAlignmentBoundsFromCornerCrosses(...)`
+  tightens the working grid bounds from the actual detected corner crosses
+
+### 7. Extract animation frames
+
+Frame extraction is now quad-based and subpixel-aware.
+
+Important history:
+
+- earlier versions used only per-frame translation
+- then affine extraction
+- now full 4-point perspective warp per frame is used
+
+Each frame uses its four surrounding lattice points:
+
+- detected cross if available
+- nominal lattice fallback if a cross is missing
+- no special corner-dot anchor logic in all-cross mode
+
+Per-frame extraction is done in OpenCV with `cv.warpPerspective`.
+
+### 8. Appearance pipeline
+
+Implemented in `js/appearance.js`.
+
+Current order:
+
+1. `Brightness`
+   in OKLab on `L`
+2. `Contrast`
+   midpoint-preserving S-curve on OKLab `L`
+3. `Vibrance`
+   adaptive chroma change in OKLab
+4. `Color Temperature`
+   after returning from OKLab, apply Bradford chromatic adaptation in linear/XYZ space
+5. `Invert`
+   final RGB inversion `255 - x`
 
 Notes:
 
-- `animation` was shortened to `anim`
-- quality suffix is appended as `_q<quality>`
-- basename is sanitized to remove spaces/junk
+- if Brightness, Contrast, Vibrance, Temperature are all zero and Invert is off, no appearance pass is done
+- appearance adjustments are lazy in preview and do not force full geometry recomputation
+- `Color Temperature` is intended to be a higher-quality warm/cool control, not a naive RGB tint
 
-## Status panel fields
+### 9. Preview architecture
 
-Currently includes:
+This was refactored away from eager all-frame recomputation.
+
+Current model:
+
+- geometry/CV changes:
+  rerun the pipeline and rebuild the base geometry/frame context
+
+- appearance changes:
+  do **not** rerun geometry
+  invalidate only appearance caches
+
+- resampling/output-scale changes:
+  do **not** rerun geometry
+  invalidate lazy frame caches
+
+Preview now works lazily:
+
+- `getBaseFrameCanvas(index)`
+  extracts one base frame on demand from the rectified grid
+- `getAdjustedFrameCanvas(index)`
+  applies appearance adjustments lazily to one frame and caches it
+
+This means:
+
+- normal preview does **not** need all frames precomputed
+- full frame realization happens mainly at GIF export time
+
+### 10. GIF export
+
+Export uses `gif.js` + `gif.worker.js`.
+
+Export flow:
+
+1. Materialize all adjusted frames.
+2. Add them to `new GIF(...)`.
+3. Encode in a worker.
+4. Create a blob URL.
+5. Show the actual GIF in the `Animation Preview` panel.
+6. Download the GIF automatically with a friendly filename.
+
+Filename format:
+
+- `<sanitized_base>_anim_YYYYMMDD_HHMMSS_q<quality>.gif`
+
+Example:
+
+- `mySrcImage_anim_20260315_012237_q10.gif`
+
+Sanitization:
+
+- extension removed
+- spaces and junk replaced with `_`
+- only letters, numbers, `.`, `_`, `-` survive
+
+## Important UI behavior
+
+### Photo panel
+
+Current text:
+
+- `Drop a photo or scan here,`
+- `or click to choose a file.`
+- `Separate frames with small crosses.`
+- `Page should be in landscape orientation.`
+
+`Load Demo` button loads `demo/mySrcImage.jpg`.
+
+### Layout panel
+
+Current controls:
+
+- `Frame Columns`
+- `Frame Rows`
+- `Paper Size (Landscape)`
+
+Paper presets:
+
+- Letter
+- Legal
+- Tabloid
+- 9x12
+- 18x12
+- 24x18
+- 36x24
+- A4
+- A3
+- A2
+- A1
+- Custom
+
+Only if preset is `Custom` are `Sheet Width` and `Sheet Height` shown.
+
+Absolute units do not matter geometrically; they are mainly used for aspect ratio and the `*100` detection-warp heuristic.
+
+### Detection & Alignment panel
+
+Current controls:
+
+- `Thresholding Method`
+  - `Offset Peak`
+  - `Otsu`
+- `Thresholding Offset`
+- `Search Inset Margin`
+- `Boundary Threshold`
+- `Boundary Persistence`
+- `Cross Region Size`
+- `Use cross-based subpixel alignment`
+
+Current defaults / ranges:
+
+- `Thresholding Offset`
+  - default `-20`
+  - range `-128..128`
+- `Search Inset Margin`
+  - default `80 px`
+  - range `0..100`
+- `Boundary Threshold`
+  - default `8.0`
+  - range `0..20`
+  - step `0.1`
+- `Boundary Persistence`
+  - default `7`
+  - range `1..15`
+- `Cross Region Size`
+  - slider range `18..110`
+  - default slider value `52`
+  - the displayed `px` value depends on current rectified geometry
+
+Important note:
+
+- `Use rectified as source` was removed from the UI
+- code still supports it internally
+- `readConfig()` currently hardwires `useRectifiedAsSource: false`
+
+### Appearance panel
+
+Current controls:
+
+- `Brightness`
+- `Contrast`
+- `Vibrance`
+- `Color Temperature`
+- `Invert`
+- `Resampling`
+- `Reset`
+
+Important:
+
+- appearance controls use the lazy preview path
+- there should not be a large full-frame recomputation on slider drag
+- releasing appearance sliders should stay lazy as well
+
+### Crop Output panel
+
+Current controls:
+
+- `Crop Left`
+- `Crop Right`
+- `Crop Top`
+- `Crop Bottom`
+- `Reset`
+
+Cropping happens before `Output Scale`.
+
+### GIF Export Options panel
+
+Current controls:
+
+- `Frame Rate`
+- `Output Scale`
+- `Encoding Quality (lower is better)`
+- `Dithering`
+- `Use Global Palette`
+
+Important:
+
+- `Output Scale` is applied after cropping
+- preview shows the scaled animation, but panel presentation size does not change
+- `Output Scale` label includes scaled dimensions like `1.00 (542×443)`
+
+Current dithering labels:
+
+- `Off`
+- `Standard (Floyd-Steinberg)`
+- `Smooth (Floyd-Steinberg Serpentine)` (default)
+- `Retro (Atkinson)`
+
+Current resampling control:
+
+- lives under `Appearance`
+- runtime options are populated in JS
+- labels are user-friendly:
+  - `Balanced (Linear)`
+  - `Sharper (Cubic)`
+  - `Maximum Detail (Lanczos)` if `cv.INTER_LANCZOS4` exists in the build
+
+### Status panel
+
+Current status includes lines such as:
 
 - raw photo size
 - paper threshold
@@ -171,655 +469,316 @@ Currently includes:
 - rectified sheet size
 - animation size
 - frame source
-- frames extracted
-- cross alignment usage/fallback text
+- detector mode
+- frame count
+- cross alignment summary
 
-## Main DOM handles in `app.js`
+Dimensions use the multiplication symbol `×`, not `x`.
 
-Important `dom` fields:
+### Main viewer panels
 
-- upload / demo
-  - `dropZone`
-  - `fileInput`
-  - `loadDemoButton`
+#### Raw Photo
 
-- layout
-  - `paperPreset`
-  - `customPaperFields`
-  - `paperWidth`
-  - `paperHeight`
-  - `frameCols`
-  - `frameRows`
+- shows the raw source image
+- header shows filename in parentheses
+- overlays lime page contour
+- drag-downloading is currently **enabled**
 
-- detection/alignment
-  - `thresholdMethod`
-  - `thresholdOffset`
-  - `thresholdOffsetValue`
-  - `crossRoiScale`
-  - `crossRoiScaleValue`
-  - `useCrossAlignment`
-  - `useRectifiedAsSource`
+#### Rectified Sheet
 
-- appearance
-  - `brightness`
-  - `brightnessValue`
-  - `contrast`
-  - `contrastValue`
-  - `vibrance`
-  - `vibranceValue`
-  - `gifResampling`
-  - `resetAppearanceButton`
+- shows the **entire rectified page**, not just the cropped frame-grid region
+- click toggles between:
+  - normal rectified-page view
+  - cross-kernel convolution diagnostic view
+- overlay colors:
+  - blue rectangle: `Search Inset Margin`
+  - red quad: coarse frame-grid detection bounds
+- drag-downloading is currently **disabled**
 
-- trim
-  - `cropLeft`
-  - `cropRight`
-  - `cropTop`
-  - `cropBottom`
-  - `resetTrimButton`
+#### Cross Regions
 
-- gif export
-  - `fps`
-  - `gifQuality`
-  - `gifQualityValue`
-  - `gifDither`
-  - `gifGlobalPalette`
-  - `exportButton`
+- shows the ROI tiles used for cross inspection
+- laid out as `(cols + 1) x (rows + 1)`
+- no decorative frame around tiles
+- intended to display at raw canvas size
+- panel scrollbars are acceptable
 
-- viewers
-  - `rawCanvas`
-  - `rawPhotoName`
-  - `rectifiedCanvas`
-  - `gifPreviewCanvas`
-  - `gifImage`
-  - `crossRoiGrid`
+#### Animation Preview
 
-## Main state in `app.js`
+Behavior:
 
-Important `state` fields:
+- before export: shows the live preview canvas
+- after export: shows the actual exported GIF only
+- if any relevant setting changes: exported GIF is revoked and hidden, live preview returns
+
+Important special behavior:
+
+- live preview canvas is **not** meant to be draggable as a downloadable asset
+- if the user tries to drag it before exporting, the drag is cancelled and the `Export GIF` button does a ringing animation
+- exported GIF image **is** draggable and uses the friendly filename
+
+## Tooltip system
+
+Tooltips are centralized in:
+
+- `js/app.js`
+  `const TOOLTIP_TEXT = { ... }`
+
+Notes:
+
+- tooltips are off by default
+- `Enable Tooltips` / `Disable Tooltips` button lives in the Status header
+- if a tooltip string is empty, no tooltip is shown
+- the live animation preview canvas keeps its tooltip even when tooltips are globally disabled
+
+The live preview tooltip text is:
+
+- `This is a live animation preview. Click 'Export GIF' to generate the GIF.`
+
+## Shared state structure
+
+Defined in `js/dom-state.js`.
+
+### `state.runtime`
 
 - `cvReady`
-- `sourceImage`
-- `sourceFilename`
-- `exportedGifFilename`
-- `sourceCanvas`
-  - full-resolution uploaded image
-- `baseRectifiedCanvas`
-  - unadjusted rectified sheet canvas
-- `adjustedRectifiedCanvas`
-  - temp canvas for adjusted rectified preview
-- `frameCanvases`
-  - IMPORTANT: now treated as a lazy cache of base extracted frames
-- `adjustedFrameCache`
-  - lazy cache of appearance-adjusted preview/export frames
-- `frameCount`
-  - separate from `frameCanvases.length`, because the frame array may be sparse
-- `rectifiedPreviewCanvas`
-- `exportedGifUrl`
-- `alignmentInfo`
+- `tooltipsEnabled`
+- `tooltipRegistry`
+
+### `state.source`
+
+- `image`
+- `filename`
+- `canvas`
 - `rawPageContour`
-- `processRequestId`
-- `pendingProcess`
+
+### `state.geometry`
+
+- `alignmentInfo`
+- `baseRectifiedCanvas`
+  rectified grid image used for frame extraction
+- `baseRectifiedPageCanvas`
+  full rectified page image used for preview
+- `pagePreviewGridQuad`
+  red overlay quad shown on full rectified page
+- `frameCount`
+
+### `state.frames`
+
+- `base`
+  lazy cache of extracted base frames
+- `adjustedCache`
+  lazy cache of appearance-adjusted frames
+
+### `state.preview`
+
+- `adjustedRectifiedCanvas`
+- `rectifiedDiagnosticCanvas`
+- `rectifiedCanvas`
+- `showRectifiedDiagnostic`
+- `frameIndex`
+- `lastTime`
+- `loopHandle`
+- `resizeTimer`
+- `exportButtonRingTimer`
 - `appearancePreviewRaf`
 - `appearancePreviewNeedsRectified`
 
-## High-level architecture
+### `state.processing`
 
-### Big change: preview is now lazy
+- `timer`
+- `active`
+- `requestId`
+- `pending`
 
-This is very important.
+### `state.export`
 
-The app used to batch-render all adjusted frames after many control changes. That caused bad UI stalls, especially around appearance edits.
+- `filename`
+- `url`
 
-Current architecture:
+## Important functions
 
-- geometry-affecting controls rerun the CV/rectification/extraction pipeline
-- appearance changes do NOT rerun the full pipeline
-- resampling changes do NOT rerun the full pipeline
-- preview frames are extracted/rendered lazily on demand
-- full all-frame generation happens mainly when exporting GIFs
+### `js/pipeline.js`
 
-This split is a major architectural change.
+Key exports:
 
-## Processing pipeline
+- `runPipeline(...)`
+- `estimateCrossRoiSidePx(...)`
+- `buildCrossConvolutionCanvas(...)`
+- `getCvInterpolationFlag(...)`
+- `extractSingleFrameToCanvas(...)`
 
-### Entry point
+Important current helpers:
 
-`processCurrentImage(requestId = state.processRequestId)`
-
-Used for geometry-changing controls and initial image load.
-
-High-level:
-
-1. read config
-2. run CV pipeline from source image
-3. cache:
-   - base extracted frame canvases
-   - base rectified sheet canvas
-   - alignment info
-   - page contour
-4. invalidate appearance caches
-5. refresh previews
-
-### `runPipeline(sourceCanvas, config, requestId)`
-
-Current `runPipeline(...)` no longer takes a pre-adjusted canvas.
-
-It uses:
-
-- `visionSrc = cv.imread(sourceCanvas)`
-- `styledSrc = cv.imread(sourceCanvas)`
-
-This means the geometry pipeline is based on raw source imagery, and appearance adjustments are now applied later/lazily rather than during the main extraction pass.
-
-## Page detection / thresholding
-
-Page detection pipeline:
-
-1. grayscale
-2. threshold
-3. largest contour
-4. quad approximation
-5. corner ordering
-
-Functions:
-
-- `estimatePaperThreshold(grayImg, method, offset)`
-- `findLargestQuad(binaryMat, totalArea)`
-- `orderCorners(pts)`
-
-### Thresholding controls
-
-`Thresholding Method`:
-
-- `Offset Peak`
-- `Otsu`
-
-`Thresholding Offset`:
-
-- range `-128 .. 128`
-- default `-20`
-
-Behavior:
-
-- `Offset Peak`: threshold = histogram peak + offset
-- `Otsu`: threshold = Otsu result + offset
-
-Otsu is available in this OpenCV.js build because `cv.THRESH_OTSU` is already used elsewhere.
-
-## Split-resolution geometry architecture
-
-This remains in place because the corner-dot detector was tuned to the original lower working scale.
-
-### Detection warp
-
-Still fixed at:
-
-- `paperWidth * 100`
-- `paperHeight * 100`
-
-Purpose:
-
-- preserve stable scale for corner-dot finding
-
-### Extraction warp
-
-Computed from:
-
-- raw page quad area
-- requested paper aspect ratio
-
-Function:
-
-- `estimateHighResPageWarpSize(quadAreaPx, paperWidthIn, paperHeightIn, pageSizeLow)`
-
-This produces a larger page warp for output-oriented work.
-
-## Perspective/homography helpers
-
-`perspectiveWarp(...)` returns:
-
-- `visionMat`
-- `styledMat`
-- `forwardTransform`
-- `inverseTransform`
-
-Helpers:
-
-- `homographyMatToArray(mat)`
-- `applyHomographyToPoint(point, homography)`
-- `mapDotRectThroughHomography(dotRect, homography)`
-
-These are used for the `Use rectified as source` / raw-source final rectification split.
-
-## Final rectification modes
-
-### `Use rectified as source` checked
-
-Final dot-based rectification is sourced from the high-res page warp.
-
-### `Use rectified as source` unchecked
-
-Final dot-based rectification uses:
-
-- raw source image
-- high-res dot quad projected back through the inverse page homography
-
-This is generally the more detail-preserving path and is now the default UI state.
-
-## Corner-dot detection
-
-Still based on the low-res detection warp.
-
-Functions:
-
-- `toLightnessGray(...)`
-- `columnSums(...)`
-- `rowSums(...)`
-- `findFirstDipFromEdge(...)`
-- `refineDotCentroid(...)`
-- `findDotRect(...)`
-
-Tuned constants:
-
-- `IGNORE_PX`
-- `DOT_DIM_PCT_COLS`
-- `DOT_DIM_PCT_ROWS`
-- `GUTTER_PCT`
-
-These remain somewhat scale-sensitive, which is why the fixed detection warp scale is still retained.
-
-## Rectified sheet + grid bounds
-
-`rectifyByDots(...)` returns:
-
-- `visionMat`
-- `styledMat`
-- `gridBounds`
-
-`gridBounds` is critical because the final rectified sheet may include padding around the true dot rectangle in order to provide real pixel margins around edge cross ROIs.
-
-The actual frame/cross lattice lives inside `gridBounds`, not necessarily across the full rectified image.
-
-## Cross detection / alignment
-
-Expected crosses:
-
-- inferred as equal spacing over `gridBounds`
-- `(cols + 1) x (rows + 1)` lattice
-- four corners are dot anchors, not crosses
-
-Functions:
-
-- `getExpectedCrossLattice(...)`
-- `getRectifiedCornerAnchors(...)`
+- `buildFrameGridRectification_fromCrosses(...)`
+- `findFrameGridQuadFromCrosses(...)`
+- `computeCrossActivityProfilesFromConvolution(...)`
+- `findFirstRiseFromEdge(...)`
+- `rectifyByQuad(...)`
 - `buildCrossAlignmentData(...)`
 - `buildUnrefinedCrossRegionInfo(...)`
-
-### Cross Regions panel behavior
-
-When cross alignment is ON:
-
-- refined cross locations are computed
-- panel shows ROI tiles with red crosshair at detected center
-- accepted/rejected hover text appears
-
-When cross alignment is OFF:
-
-- refined locations are not computed
-- ROI tiles are centered on nominal expected positions
-- red crosshair sits at exact tile center
-- hover text is suppressed
-
-### Confidence / fallback policy
-
-- weak/failed crosses are rejected
-- ideal lattice positions are used as fallback
-- corner dots are used as corner anchors
-- if too many crosses are missing, pipeline falls back gracefully
-
-## Subpixel refinement
-
-Yes, the cross alignment path is truly subpixel.
-
-Why:
-
-- `getWeightedPeakIndex(...)` returns a fractional position
-- `detectCrossAtExpectedPosition(...)` maps that fractional peak back to floating-point sheet coordinates
-- those floating-point coordinates feed the per-frame quad extraction
-
-This is subpixel estimation, not just integer snapping.
-
-## Frame extraction
-
-Current frame extraction still uses per-frame perspective warps.
-
-Functions:
-
-- `sliceRectifiedToCanvases(...)`
-- `extractSingleFrameToCanvas(...)`
-- `resolveFrameQuad(...)`
-- `bilerpQuad(...)`
-
-Important:
-
-- `sliceRectifiedToCanvases(...)` is still used during the full geometry pipeline
-- `extractSingleFrameToCanvas(...)` is also used later for lazy on-demand frame extraction
-
-## Lazy preview architecture
-
-This is one of the most important new sections.
-
-### Base frame cache
-
-`state.frameCanvases`
-
-- stores base extracted frames
-- may be sparse
-- should be thought of as a lazy cache, not a guaranteed fully populated contiguous batch
-
-### Base frame lookup
-
-`getBaseFrameCanvas(index)`
-
-- returns cached base frame if present
-- otherwise:
-  - uses cached `baseRectifiedCanvas`
-  - uses cached `alignmentInfo`
-  - uses current crop + resampling
-  - extracts a single frame on demand
-  - caches it in `state.frameCanvases[index]`
-
-This is why `Resampling` can now be lazy.
-
-### Adjusted frame cache
-
-`state.adjustedFrameCache`
-
-`getAdjustedFrameCanvas(index)`
-
-- reads base frame via `getBaseFrameCanvas(index)`
-- if appearance adjustments are zero, returns base frame
-- otherwise applies appearance adjustments to a per-frame canvas lazily
-- caches the adjusted result
-
-### Preview loop
-
-`drawCurrentGifPreview()`
-
-- asks for the adjusted current frame lazily
-- does not require all frames to be precomputed
-
-`startGifPreviewLoop()`
-
-- uses `state.frameCount` instead of assuming `frameCanvases.length` is a full batch
-
-## Appearance pipeline
-
-Appearance controls are now:
-
-- `Brightness`
-- `Contrast`
-- `Vibrance`
-
-Old `Saturation` is gone.
-
-### Important implementation change
-
-Appearance is now performed in a single OKLab pass.
-
-Workflow per pixel:
-
-1. `sRGB -> OKLab`
-2. apply brightness on `L`
-3. apply contrast curve on `L`
-4. apply vibrance on chroma (`a`, `b`)
-5. `OKLab -> sRGB`
-
-This replaced the older mixture of canvas filters + multiple passes.
-
-Functions:
-
-- `applyVisualAdjustments(sourceCanvas, targetCanvas, filters)`
-- `applyOklabAppearanceAdjustments(canvas, filters)`
-- `srgbToOklab(...)`
-- `oklabToSrgb(...)`
-- `srgbToLinear(...)`
-- `linearToSrgb(...)`
-
-### Brightness
-
-Brightness is perceptual:
-
-- implemented as an OKLab `L` shift
-
-### Contrast
-
-Contrast is midpoint-preserving and now applied to OKLab `L`, not RGB channels.
-
-Functions:
-
-- `mapContrastSliderToCurveStrength(...)`
-- `applyMidpointSCurve(value, k)`
-
-Negative contrast:
-
-- uses the inverse S-curve logic
-- should truly reduce contrast instead of mirroring positive contrast
-
-### Vibrance
-
-Vibrance is adaptive, not plain saturation.
-
-Behavior:
-
-- boosts muted colors more
-- leaves already vivid colors more stable
-- implemented via OKLab chroma scaling with an adaptive `(1 - normalized_chroma)` style factor
-
-Functions:
-
-- `mapVibranceSliderToAmount(...)`
-
-The vibrance strength mapping was made stronger than the original timid version.
-
-### No-op shortcut
-
-If `Brightness == 0 && Contrast == 0 && Vibrance == 0`, the OKLab appearance pass is skipped entirely.
-
-## Appearance slider responsiveness
-
-This changed multiple times; current state matters.
-
-Current behavior:
-
-- appearance slider `input` no longer does heavy work synchronously inside every DOM event
-- slider input now:
-  - revokes stale GIF
-  - updates readouts
-  - invalidates appearance cache
-  - schedules one preview update via `requestAnimationFrame`
-  - cancels stale in-flight geometry work
-
-- the expensive rectified-sheet adjusted preview is deferred until slider release
-- while dragging, the app mainly updates the current animation preview frame lazily
-
-Implementation helpers:
-
-- `scheduleAppearancePreviewUpdate(includeRectified = false)`
-- `appearancePreviewRaf`
-- `appearancePreviewNeedsRectified`
-
-This was introduced because direct OKLab rendering inside every slider `input` callback made both the animation and the slider itself sluggish.
-
-## Resampling behavior
-
-`Resampling` now lives under `Appearance`, not `GIF Export Options`.
-
-Options are runtime-populated in `populateResamplingOptions()`:
-
-- `Balanced (Linear)`
-- `Sharper (Cubic)`
-- `Maximum Detail (Lanczos)` if `cv.INTER_LANCZOS4` exists in this OpenCV build
-
-Important:
-
-- Resampling no longer forces a full geometry rerun
-- it now invalidates frame caches and lazily re-extracts preview frames from the cached rectified sheet/alignment data
-
-This is an important recent improvement.
-
-## GIF export options
-
-Current user-facing options:
-
-- `Frame Rate`
-- `Encoding Quality (lower is better)`
-- `Dithering`
-- `Use Global Palette`
-
-### Dithering choices
-
-Curated list:
-
-- `Off`
-- `Standard (Floyd-Steinberg)`
-- `Smooth (Floyd-Steinberg Serpentine)` default
-- `Retro (Atkinson)`
-
-### Encoding quality
-
-Important:
-
-- lower number = better quality / slower
-- higher number = lower quality / faster
-
-This is a property of the specific `gif.js` build in use.
-
-### What export controls affect
-
-- `Frame Rate`, `Encoding Quality`, `Dithering`, `Use Global Palette`
-  do NOT require a geometry rerun
-
-- Export uses `getAdjustedFrameCanvas(i)` across all frames at export time, so the full adjusted batch is effectively realized only when needed for GIF writing.
-
-## Raw photo overlay
-
-The `Raw Photo` panel now outlines the detected page contour with:
-
-- semi-transparent lime stroke
-
-The contour is stored in `state.rawPageContour` and redrawn on resize.
-
-## Resize behavior
-
-Previews maintain aspect ratio and redraw on resize.
-
-Relevant functions:
-
-- `renderCanvasFit(...)`
+- `refineAlignmentBoundsFromCornerCrosses(...)`
+- `buildMarkerLookup(...)`
+
+Known critical bug that was fixed:
+
+- when switching to all-cross mode, `buildMarkerLookup()` used to overwrite detected corner crosses with empty anchor-dot placeholders because `anchorDots` was empty
+- fix: only install corner anchors if `anchorDots.length >= 4`
+- symptom before fix:
+  - solid-color preview
+  - very slow export
+  - corrupted GIF
+
+### `js/app.js`
+
+Important controller functions:
+
+- `init()`
+- `attachUi()`
+- `initializeTooltips()`
+- `setTooltipsEnabled(...)`
+- `readConfig()`
+- `processCurrentImage(...)`
 - `renderRawPreview()`
 - `renderRectifiedPreview(...)`
+- `renderCrossRoiGrid(...)`
+- `getBaseFrameCanvas(...)`
+- `getAdjustedFrameCanvas(...)`
 - `drawCurrentGifPreview()`
-- `rerenderPreviews()`
+- `exportGif()`
+- `revokeGifUrl()`
 
-There were several past CSS/layout bugs around viewer drift and stale canvas resizing; current code attempts to avoid them by redrawing on resize.
+### `js/appearance.js`
 
-## Drag/export behavior
+Key functions:
 
-- `Raw Photo` drag uses the full-resolution `state.sourceCanvas`
-- `Rectified Sheet` drag uses the backing rectified canvas, not just the panel preview
-- exported GIF drag uses `DownloadURL` with the friendly filename
+- `hasAppearanceAdjustments(...)`
+- `applyVisualAdjustments(...)`
+- `applyOklabAppearanceAdjustments(...)`
+- `mapTemperatureSliderToMiredShift(...)`
+- `makeTemperatureAdaptation(...)`
+- `adaptSrgbTemperature(...)`
 
-## OpenCV.js runtime caveat
+## GIF worker patch
 
-The project uses a local OpenCV.js build that appears older / asm.js style.
+`js/gif.worker.js` contains a local bug fix.
 
-Known implication:
+Problem:
 
-- not all OpenCV APIs are available
-- earlier, `cv.getRectSubPix` was missing
+- in serpentine dithering, the reverse-scan loop skipped `x = 0`
+- result was an alternating corrupted leftmost pixel column in exported GIFs
+- this was especially visible with `Smooth (Floyd-Steinberg Serpentine)`
 
-So code should prefer conservative OpenCV APIs that are already known to work in this build.
+Fix:
 
-## Important recent bug fixes / lessons
+- reverse serpentine loop now includes `x = 0`
 
-1. `smooth1D()` used to be a trailing moving average, which biased cross detections down-right.
-   It is now centered.
+Do not casually remove this patch.
 
-2. Edge cross ROIs used to be sampled from images cropped too tightly, causing replicated-border junk.
-   This was fixed by padding the rectified sheet and tracking `gridBounds`.
+## Current drag behaviors
 
-3. Cross Regions must remain useful both with alignment enabled and disabled.
+- Raw Photo:
+  drag-download enabled
+- Rectified Sheet:
+  drag-download disabled
+- Animation Preview live canvas:
+  not really draggable; drag triggers Export-button attention animation
+- Exported GIF image:
+  draggable and named correctly
 
-4. Resampling and appearance should not trigger full geometry work unnecessarily.
+## Known sensitivities / likely future work
 
-5. The slider lag issue was caused by doing heavy appearance work directly inside `input` handlers on the main thread.
-   Current code defers/coalesces this with `requestAnimationFrame`.
+### 1. Coarse cross-only detector tuning
 
-## Current defaults
+This is the newest and most likely area for future work.
 
-- paper preset default: `Letter (11×8.5 in)`
-- frame columns default: `5`
-- frame rows default: `4`
-- threshold method default: `Offset Peak`
-- threshold offset default: `-20`
-- cross region slider default: `60`
-- use cross alignment default: checked
-- use rectified as source default: unchecked
-- brightness default: `0`
-- contrast default: `0`
-- vibrance default: `0`
-- resampling default: `linear`
-- fps default: `20`
-- gif quality default: `10`
-- dithering default: `Smooth (Floyd-Steinberg Serpentine)`
-- global palette default: unchecked
+Current detector depends on:
 
-## Things intentionally removed or changed from earlier versions
+- `Search Inset Margin`
+- `Boundary Threshold`
+- `Boundary Persistence`
+- the custom `crossKernel`
 
-- no p5.js
-- no page preset/orientation split beyond current landscape-oriented paper preset list
-- no old rectified-sheet cross overlay debug UI
-- old `Saturation` replaced by `Vibrance`
-- `Playback` panel removed; frame rate moved into `GIF Export Options`
-- `Detection` and `Alignment` merged into one panel
+The current approach is intentionally simpler than the old circle detector:
 
-## Good next debugging questions
+- no peak refinement
+- no gutter logic
+- no special circle geometry
 
-If something regresses, check these:
+If it fails, inspect:
 
-1. Did a control incorrectly trigger `processCurrentImage()` when it should only invalidate lazy caches?
-2. Is `state.frameCount` correct even when `state.frameCanvases` is sparse?
-3. Is `getBaseFrameCanvas(index)` extracting from the correct cached rectified sheet and alignment info?
-4. Is `Resampling` accidentally causing geometry recalculation again?
-5. Are appearance slider handlers doing too much work directly on `input` instead of via `scheduleAppearancePreviewUpdate()`?
-6. If cross alignment seems wrong, inspect:
-   - Cross Regions panel
-   - ROI centering
-   - edge ROI padding behavior
-   - confidence thresholds
-   - fractional detected positions
+- `Rectified Sheet` convolution view
+- blue inset
+- red coarse quad
+- `Cross Regions`
+- demo reference files in `demo/`
 
-## Minimal mental model
+### 2. Memory instrumentation
 
-Think of the app as having three layers:
+This has been discussed but not implemented yet.
 
-1. Geometry layer
-   - page detection
-   - corner-dot detection
-   - final rectification
-   - cross alignment
-   - frame quads
+Potential future work:
 
-2. Base image layer
-   - raw uploaded image
-   - base rectified sheet
-   - lazily extracted base frames
+- track canvas/mat allocations and estimated pixel-buffer memory
+- surface that in `Status`
 
-3. Appearance/export layer
-   - lazy OKLab appearance adjustment for preview
-   - lazy resampling-based frame extraction
-   - full all-frame realization only when exporting GIFs
+### 3. LLM context drift
 
-If you preserve that separation, the app stays responsive.
+The code has moved substantially from the earlier tool:
 
+- no p5
+- no active circle detector in normal use
+- no eager all-frame preview recomputation
+- appearance and export behavior are now more sophisticated
+
+If the code and this README disagree, trust the code first.
+
+## Current defaults snapshot
+
+At the time of this handoff, notable defaults are:
+
+- demo frames: `5 x 4`
+- paper preset: `Letter (11×8.5 in)`
+- threshold method: `Offset Peak`
+- threshold offset: `-20`
+- search inset margin: `80 px`
+- boundary threshold: `8.0`
+- boundary persistence: `7`
+- cross region size slider: `52`
+- cross alignment: on
+- brightness: `0`
+- contrast: `0`
+- vibrance: `0`
+- color temperature: `0`
+- invert: off
+- output scale: `1.00`
+- fps: `20`
+- encoding quality: `10`
+- dither: `Smooth (Floyd-Steinberg Serpentine)`
+- global palette: off
+
+## Practical advice for the next LLM
+
+If you need to resume work quickly:
+
+1. Read `js/pipeline.js` first, especially:
+   - `runPipeline(...)`
+   - `buildFrameGridRectification_fromCrosses(...)`
+   - `findFrameGridQuadFromCrosses(...)`
+2. Then read `js/app.js` around:
+   - `readConfig()`
+   - `processCurrentImage(...)`
+   - `getBaseFrameCanvas(...)`
+   - `getAdjustedFrameCanvas(...)`
+   - `drawCurrentGifPreview()`
+   - `exportGif()`
+3. Then read `js/appearance.js` for the appearance stack.
+4. Use the demo assets in `demo/` for debugging the convolution detector.
+
+The most fragile conceptual boundary in the current app is:
+
+- coarse page/grid detection in `pipeline.js`
+  versus
+- lazy preview/export realization in `app.js`
+
+Keep those responsibilities separate if you make future changes.

@@ -4,11 +4,90 @@ import { drawImageToCanvas, renderCanvasFit, resizeCanvasToBox } from "./canvas-
 import {
   runPipeline,
   estimateCrossRoiSidePx,
+  buildCrossConvolutionCanvas,
   getCvInterpolationFlag,
   extractSingleFrameToCanvas,
 } from "./pipeline.js";
 
+const TOOLTIP_TEXT = {
+  "#appTitle": "",
+  "#appLedePrimary": "",
+  "#appLedeSecondary": "",
+  "#photoHeading": "Loads a source photo or scan for processing. Pages must be in landscape orientation.",
+  "#loadDemoButton": "Loads the bundled demo image without choosing a file.",
+  "#dropZone": "Drop a photo or scan of a plotted frame-sheet here, or click to choose a file. Pages must be in landscape orientation.",
+  "#layoutSummary": "Sets the frame-grid dimensions and paper format assumptions.",
+  "#frameCols": "Number of animation frame columns in the plotted grid.",
+  "#frameRows": "Number of animation frame rows in the plotted grid.",
+  "#paperPreset": "Choose a landscape paper preset, or Custom to enter your own dimensions.",
+  "#paperWidth": "Custom paper width (arbitrary units) when Paper Size is set to Custom.",
+  "#paperHeight": "Custom paper height (arbitrary units) when Paper Size is set to Custom.",
+  "#detectionAlignmentSummary": "Controls for finding the paper, locating the frame grid, and refining extracted frames using crosses.",
+  "#thresholdMethod": "Thresholding methods for finding the paper quadrilateral.",
+  "#thresholdOffset": "Nudges the paper threshold darker or lighter after thresholding.",
+  "#paperMargin": "Insets the coarse boundary search away from the page edge to avoid background bleed and warped borders.",
+  "#boundarySensitivity": "The threshold used to find the frame-grid.",
+  "#boundaryPersistence": "How many consecutive pixels must stay above the threshold before the frame-grid boundary is accepted.",
+  "#crossRoiScale": "Sets the size of the square search regions used to localize each registration cross.",
+  "#useCrossAlignment": "Use detected crosses to refine frame extraction beyond a nominal equal-spaced grid.",
+  "#appearanceSummary": "Adjusts the look of the extracted animation frames.",
+  "#resetAppearanceButton": "Restores all appearance controls to their default values.",
+  "#brightness": "Adjusts perceptual lightness before contrast and vibrance are applied.",
+  "#contrast": "Applies a midpoint-preserving contrast curve to OKLab lightness.",
+  "#vibrance": "Boosts or reduces muted colors more than already-saturated colors.",
+  "#temperature": "Shifts the image white balance cooler or warmer using chromatic adaptation after the OKLab adjustments.",
+  "#invert": "Inverts the animation frames like a photographic negative.",
+  "#gifResampling": "Selects the interpolation method used when extracting and unwarping frames.",
+  "#cropOutputSummary": "Crops pixels away from the extracted animation frames.",
+  "#resetTrimButton": "Restores all crop values to zero.",
+  "#cropLeft": "Crops pixels from the left side of the animation (before optional output scaling).",
+  "#cropRight": "Crops pixels from the right side of the animation (before optional output scaling).",
+  "#cropTop": "Crops pixels from the top of the animation (before optional output scaling).",
+  "#cropBottom": "Crops pixels from the bottom of the animation (before optional output scaling).",
+  "#gifExportSummary": "Controls that affect preview playback and the exported GIF file.",
+  "#fps": "Playback speed of the preview animation and exported GIF in frames per second.",
+  "#outputScale": "Scales the final animation for preview and export (post-cropping).",
+  "#gifQuality": "GIF encoder quality setting. Lower numbers are slower but higher quality.",
+  "#gifDither": "Selects the dithering method used during GIF color quantization.",
+  "#gifGlobalPalette": "Use one shared palette for all GIF frames, instead of per-frame palettes.",
+  "#statusHeading": "Processing and diagnostic status for the current image and settings.",
+  "#tooltipToggleButton": "Turn tooltips on or off throughout the interface.",
+  "#statusText": "Current pipeline status and other diagnostic information.",
+  "#rawPhotoHeading": "Preview of the original source image.",
+  "#rawCanvas": "Preview of the source photo. The detected paper contour is outlined in green.",
+  "#rectifiedSheetHeading": "Preview of the rectified page used for frame detection and extraction.",
+  "#rectifiedCanvas": "Preview of the rectified page; click to toggle the convolution diagnostic view.",
+  "#crossRegionsHeading": "Diagnostic tiles showing the regions used to localize each registration cross.",
+  "#crossRoiGrid": "Per-cross diagnostic regions used to inspect registration mark detection.",
+  "#animationPreviewHeading": "Live animation preview using the current settings.",
+  "#exportButton": "Render and download the animated GIF using the current settings.",
+  "#gifPreviewCanvas": "This is a live animation preview. Click 'Export GIF' to generate the GIF.",
+  "#gifImage": "Most recently exported GIF preview image.",
+};
+
 init();
+
+/**
+ * Keep the Animation Preview panel title in sync with whether it is showing the live canvas
+ * or a completed exported GIF.
+ *
+ * @returns {void}
+ */
+function updateAnimationPreviewHeading() {
+  dom.animationPreviewHeading.textContent = state.export.url ? "GIF Output" : "Animation Preview";
+}
+
+/**
+ * Set the Export GIF button label, optionally with an in-progress percentage suffix.
+ *
+ * @param {number | null} [progressPercent=null]
+ * @returns {void}
+ */
+function updateExportButtonLabel(progressPercent = null) {
+  dom.exportButton.textContent = (typeof progressPercent === "number")
+    ? `Export GIF ...${progressPercent}%`
+    : "Export GIF";
+}
 
 /**
  * Bootstrap the application once the module is loaded.
@@ -17,10 +96,14 @@ init();
  */
 function init() {
   attachUi();
+  initializeTooltips();
   syncPaperPresetUi();
+  dom.gifPreviewCanvas.title = TOOLTIP_TEXT["#gifPreviewCanvas"] || "";
   dom.gifImage.classList.add("hidden");
   dom.gifImage.hidden = true;
   dom.gifImage.removeAttribute("src");
+  updateAnimationPreviewHeading();
+  updateExportButtonLabel();
 
   if (typeof cv !== "undefined" && cv.onRuntimeInitialized) {
     cv.onRuntimeInitialized = onOpenCvReady;
@@ -41,8 +124,12 @@ function init() {
  * @returns {void}
  */
 function attachUi() {
+  // Raw-photo drag-out is enabled for convenient access to the uploaded source image.
   makeCanvasDraggable(dom.rawCanvas, "raw-photo.png", () => state.source.canvas);
-  makeCanvasDraggable(dom.rectifiedCanvas, "rectified-sheet.png", () => state.preview.rectifiedCanvas);
+  // Disabled for now: dragging this preview out of the browser was useful for debugging,
+  // but it is currently not desired in the UI. The helper is kept in case we restore it later.
+  // makeCanvasDraggable(dom.rectifiedCanvas, "rectified-sheet.png", () => state.preview.rectifiedCanvas);
+  makeLivePreviewDragCue();
   makeGifImageDraggable();
 
   dom.dropZone.addEventListener("dragover", (event) => {
@@ -65,9 +152,18 @@ function attachUi() {
   dom.loadDemoButton.addEventListener("click", () => {
     void loadImageSource("demo/mySrcImage.jpg", "mySrcImage.jpg");
   });
+  dom.rectifiedCanvas.addEventListener("click", () => {
+    state.preview.showRectifiedDiagnostic = !state.preview.showRectifiedDiagnostic;
+    if (state.preview.rectifiedCanvas) {
+      renderRectifiedPreview(state.preview.rectifiedCanvas);
+    }
+  });
 
   attachResetButton(dom.resetAppearanceButton, resetAppearanceControls);
   attachResetButton(dom.resetTrimButton, resetTrimControls);
+  dom.tooltipToggleButton.addEventListener("click", () => {
+    setTooltipsEnabled(!state.runtime.tooltipsEnabled);
+  });
 
   dom.paperPreset.addEventListener("input", () => {
     syncPaperPresetUi();
@@ -79,7 +175,7 @@ function attachUi() {
     scheduleProcess();
   });
 
-  const appearanceInputs = [dom.brightness, dom.contrast, dom.vibrance, dom.invert];
+  const appearanceInputs = [dom.brightness, dom.contrast, dom.vibrance, dom.temperature, dom.invert];
   appearanceInputs.forEach((input) => {
     input.addEventListener("input", () => {
       revokeGifUrl();
@@ -92,7 +188,7 @@ function attachUi() {
       revokeGifUrl();
       updateSliderReadouts();
       invalidateAppearanceCache();
-      scheduleAppearancePreviewUpdate(true);
+      scheduleAppearancePreviewUpdate(false);
     });
   });
 
@@ -103,13 +199,11 @@ function attachUi() {
     dom.frameRows,
     dom.thresholdMethod,
     dom.thresholdOffset,
+    dom.paperMargin,
+    dom.boundarySensitivity,
+    dom.boundaryPersistence,
     dom.crossRoiScale,
     dom.useCrossAlignment,
-    dom.useRectifiedAsSource,
-    dom.cropLeft,
-    dom.cropRight,
-    dom.cropTop,
-    dom.cropBottom,
   ];
   geometryInputs.forEach((input) => {
     input.addEventListener("input", () => {
@@ -123,17 +217,42 @@ function attachUi() {
     });
   });
 
-  const lazyFrameInputs = [dom.gifResampling, dom.fps, dom.gifQuality, dom.gifDither, dom.gifGlobalPalette];
+  const lazyFrameInputs = [
+    dom.gifResampling,
+    dom.outputScale,
+    dom.cropLeft,
+    dom.cropRight,
+    dom.cropTop,
+    dom.cropBottom,
+    dom.fps,
+    dom.gifQuality,
+    dom.gifDither,
+    dom.gifGlobalPalette
+  ];
   lazyFrameInputs.forEach((input) => {
     input.addEventListener("input", () => {
       revokeGifUrl();
       updateSliderReadouts();
-      if (input === dom.gifResampling) invalidateFrameCaches();
+      if (
+        (input === dom.gifResampling) ||
+        (input === dom.outputScale) ||
+        (input === dom.cropLeft) ||
+        (input === dom.cropRight) ||
+        (input === dom.cropTop) ||
+        (input === dom.cropBottom)
+      ) invalidateFrameCaches();
       drawCurrentGifPreview();
     });
     input.addEventListener("change", () => {
       revokeGifUrl();
-      if (input === dom.gifResampling) invalidateFrameCaches();
+      if (
+        (input === dom.gifResampling) ||
+        (input === dom.outputScale) ||
+        (input === dom.cropLeft) ||
+        (input === dom.cropRight) ||
+        (input === dom.cropTop) ||
+        (input === dom.cropBottom)
+      ) invalidateFrameCaches();
       drawCurrentGifPreview();
     });
   });
@@ -141,6 +260,46 @@ function attachUi() {
   dom.exportButton.addEventListener("click", () => {
     void exportGif();
   });
+}
+
+/**
+ * Register tooltip text for major UI controls and keep them disabled by default.
+ *
+ * @returns {void}
+ */
+function initializeTooltips() {
+  const tooltipMap = new Map();
+  for (const [selector, text] of Object.entries(TOOLTIP_TEXT)) {
+    document.querySelectorAll(selector).forEach((element) => {
+      tooltipMap.set(element, text);
+      const isFormControl = element.matches("input, select, textarea, output");
+      if (isFormControl) {
+        const label = element.closest("label");
+        if (label) tooltipMap.set(label, text);
+      }
+    });
+  }
+  state.runtime.tooltipRegistry = [...tooltipMap.entries()];
+  setTooltipsEnabled(false);
+}
+
+/**
+ * Enable or disable native browser tooltips across the registered controls.
+ *
+ * @param {boolean} enabled
+ * @returns {void}
+ */
+function setTooltipsEnabled(enabled) {
+  state.runtime.tooltipsEnabled = enabled;
+  for (const [element, text] of state.runtime.tooltipRegistry || []) {
+    if (enabled && String(text || "").trim()) {
+      element.title = text;
+    } else {
+      element.removeAttribute("title");
+    }
+  }
+  dom.gifPreviewCanvas.title = TOOLTIP_TEXT["#gifPreviewCanvas"] || "";
+  dom.tooltipToggleButton.textContent = enabled ? "Disable Tooltips" : "Enable Tooltips";
 }
 
 /**
@@ -191,6 +350,40 @@ function makeGifImageDraggable() {
 }
 
 /**
+ * Intercept drag attempts on the live preview canvas and point the user toward Export GIF.
+ *
+ * @returns {void}
+ */
+function makeLivePreviewDragCue() {
+  dom.gifPreviewCanvas.draggable = true;
+  dom.gifPreviewCanvas.addEventListener("dragstart", (event) => {
+    // Only an exported GIF is a real downloadable asset. The live canvas is just a viewer.
+    if (state.export.url) {
+      event.preventDefault();
+      return;
+    }
+    event.preventDefault();
+    triggerExportButtonAttention();
+  });
+}
+
+/**
+ * Run a brief cartoon-like "ring" animation on the Export GIF button.
+ *
+ * @returns {void}
+ */
+function triggerExportButtonAttention() {
+  const button = dom.exportButton;
+  button.classList.remove("button-ring");
+  void button.offsetWidth;
+  button.classList.add("button-ring");
+  window.clearTimeout(state.preview.exportButtonRingTimer || 0);
+  state.preview.exportButtonRingTimer = window.setTimeout(() => {
+    button.classList.remove("button-ring");
+  }, 900);
+}
+
+/**
  * Wire a small header reset button without toggling the parent details element.
  *
  * @param {HTMLButtonElement | null} button
@@ -215,6 +408,7 @@ function resetAppearanceControls() {
   dom.brightness.value = "0";
   dom.contrast.value = "0";
   dom.vibrance.value = "0";
+  dom.temperature.value = "0";
   dom.invert.checked = false;
   dom.gifResampling.value = "linear";
   revokeGifUrl();
@@ -231,13 +425,22 @@ function resetAppearanceControls() {
  * @returns {void}
  */
 function resetTrimControls() {
+  const alreadyReset =
+    (Number(dom.cropLeft.value) || 0) === 0 &&
+    (Number(dom.cropRight.value) || 0) === 0 &&
+    (Number(dom.cropTop.value) || 0) === 0 &&
+    (Number(dom.cropBottom.value) || 0) === 0;
+  if (alreadyReset) {
+    return;
+  }
   dom.cropLeft.value = "0";
   dom.cropRight.value = "0";
   dom.cropTop.value = "0";
   dom.cropBottom.value = "0";
   revokeGifUrl();
   updateSliderReadouts();
-  scheduleProcess();
+  invalidateFrameCaches();
+  drawCurrentGifPreview();
 }
 
 /**
@@ -349,6 +552,9 @@ async function loadImageSource(src, filename = "", onComplete = null) {
       state.source.filename = filename || "";
       state.source.rawPageContour = null;
       state.geometry.baseRectifiedCanvas = null;
+      state.geometry.baseRectifiedPageCanvas = null;
+      state.geometry.pagePreviewGridQuad = null;
+      state.preview.showRectifiedDiagnostic = false;
       state.geometry.alignmentInfo = null;
       state.geometry.frameCount = 0;
       invalidateFrameCaches();
@@ -395,14 +601,16 @@ function scheduleProcess() {
  *   frameRows:number,
  *   thresholdMethod:string,
  *   thresholdOffset:number,
+ *   paperMarginPx:number,
+ *   boundarySensitivity:number,
+ *   boundaryPersistencePx:number,
  *   crossRoiScalePct:number,
  *   crossRoiScale:number,
  *   useCrossAlignment:boolean,
- *   useRectifiedAsSource:boolean,
  *   crop:{left:number,right:number,top:number,bottom:number},
- *   filters:{brightness:number,contrast:number,vibrance:number,invert:boolean},
+ *   filters:{brightness:number,contrast:number,vibrance:number,temperature:number,invert:boolean},
  *   fps:number,
- *   exportOptions:{quality:number,dither:string|false,resampling:string,globalPalette:boolean}
+ *   exportOptions:{quality:number,dither:string|false,resampling:string,globalPalette:boolean,outputScale:number}
  * }}
  */
 function readConfig() {
@@ -419,10 +627,13 @@ function readConfig() {
     frameRows: Math.max(1, Math.round(Number(dom.frameRows.value) || 4)),
     thresholdMethod: dom.thresholdMethod.value || "offset-peak",
     thresholdOffset: Math.max(-128, Math.min(128, Math.round(Number(dom.thresholdOffset.value) || -20))),
-    crossRoiScalePct: Math.max(30, Math.min(150, Number(dom.crossRoiScale.value) || 60)),
-    crossRoiScale: Math.max(0.3, Math.min(1.5, (Number(dom.crossRoiScale.value) || 60) / 100)),
+    paperMarginPx: Math.max(0, Math.min(150, Math.round(Number(dom.paperMargin.value) || 80))),
+    boundarySensitivity: Math.max(0, Math.min(20, Number(dom.boundarySensitivity.value) || 8)),
+    boundaryPersistencePx: Math.max(1, Math.min(15, Math.round(Number(dom.boundaryPersistence.value) || 7))),
+    crossRoiScalePct: Math.max(18, Math.min(110, Number(dom.crossRoiScale.value) || 52)),
+    crossRoiScale: Math.max(0.18, Math.min(1.1, (Number(dom.crossRoiScale.value) || 52) / 100)),
     useCrossAlignment: dom.useCrossAlignment.checked,
-    useRectifiedAsSource: dom.useRectifiedAsSource.checked,
+    useRectifiedAsSource: false,
     crop: {
       left: Math.max(0, Math.round(Number(dom.cropLeft.value) || 0)),
       right: Math.max(0, Math.round(Number(dom.cropRight.value) || 0)),
@@ -433,10 +644,12 @@ function readConfig() {
       brightness: Number(dom.brightness.value) || 0,
       contrast: Number(dom.contrast.value) || 0,
       vibrance: Number(dom.vibrance.value) || 0,
+      temperature: Number(dom.temperature.value) || 0,
       invert: dom.invert.checked,
     },
     fps: Math.max(1, Math.min(60, Math.round(Number(dom.fps.value) || 20))),
     exportOptions: {
+      outputScale: Math.max(0.25, Math.min(1.0, Number(dom.outputScale.value) || 1)),
       quality: Math.max(1, Math.min(20, Math.round(Number(dom.gifQuality.value) || 10))),
       dither: (dom.gifDither.value && dom.gifDither.value !== "off") ? dom.gifDither.value : false,
       resampling: dom.gifResampling.value || "linear",
@@ -472,7 +685,14 @@ function updateSliderReadouts() {
   dom.brightnessValue.textContent = formatSignedValue(dom.brightness.value);
   dom.contrastValue.textContent = formatSignedValue(dom.contrast.value);
   dom.vibranceValue.textContent = formatSignedValue(dom.vibrance.value);
+  dom.temperatureValue.textContent = formatSignedValue(dom.temperature.value);
   dom.thresholdOffsetValue.textContent = formatSignedValue(dom.thresholdOffset.value);
+  dom.paperMarginValue.textContent = `${Math.max(0, Math.min(150, Number(dom.paperMargin.value) || 80))} px`;
+  dom.boundarySensitivityValue.textContent = `${Math.max(0, Math.min(20, Number(dom.boundarySensitivity.value) || 8)).toFixed(1)}`;
+  dom.boundaryPersistenceValue.textContent = String(Math.max(1, Math.min(15, Number(dom.boundaryPersistence.value) || 7)));
+  const outputScale = Math.max(0.25, Math.min(1.0, Number(dom.outputScale.value) || 1));
+  const scaledSize = getScaledOutputFrameSize(outputScale);
+  dom.outputScaleValue.textContent = `${outputScale.toFixed(2)} (${scaledSize.width}\u00d7${scaledSize.height})`;
   dom.gifQualityValue.textContent = String(Math.max(1, Math.min(20, Number(dom.gifQuality.value) || 10)));
   if (!state.geometry.alignmentInfo) {
     dom.crossRoiScaleValue.textContent = "-- px";
@@ -531,6 +751,8 @@ async function processCurrentImage(requestId = state.processing.requestId) {
     state.geometry.frameCount = result.frames.length;
     state.geometry.alignmentInfo = result.alignmentInfo;
     state.geometry.baseRectifiedCanvas = result.rectifiedCanvas;
+    state.geometry.baseRectifiedPageCanvas = result.pagePreviewCanvas;
+    state.geometry.pagePreviewGridQuad = result.pagePreviewGridQuad;
     state.source.rawPageContour = result.pageQuadPoints;
     invalidateAppearanceCache();
     updateSliderReadouts();
@@ -539,10 +761,22 @@ async function processCurrentImage(requestId = state.processing.requestId) {
     renderCrossRoiGrid(result.alignmentInfo);
     drawCurrentGifPreview();
     dom.exportButton.disabled = state.geometry.frameCount === 0;
+    updateExportButtonLabel();
     setStatus(result.statusText);
   } catch (error) {
     if (error?.name !== "ProcessAbortedError") {
+      if (error?.partialResult?.pageQuadPoints) {
+        state.source.rawPageContour = error.partialResult.pageQuadPoints;
+        renderRawPreview();
+      }
+      if (error?.partialResult?.rectifiedCanvas) {
+        state.geometry.baseRectifiedPageCanvas = error.partialResult.rectifiedCanvas;
+        state.geometry.pagePreviewGridQuad = null;
+        state.preview.rectifiedCanvas = error.partialResult.rectifiedCanvas;
+        renderRectifiedPreview(error.partialResult.rectifiedCanvas);
+      }
       console.error(error);
+      updateExportButtonLabel();
       setStatus("Processing failed.\n" + (error?.message || String(error)));
     }
   } finally {
@@ -578,7 +812,58 @@ function throwIfProcessAborted(requestId) {
  * @returns {void}
  */
 function renderRectifiedPreview(rectifiedCanvas) {
-  renderCanvasFit(rectifiedCanvas, dom.rectifiedCanvas);
+  const diagnosticSource = state.geometry.baseRectifiedPageCanvas || rectifiedCanvas;
+  const displayCanvas = state.preview.showRectifiedDiagnostic
+    ? getRectifiedConvolutionCanvas(diagnosticSource)
+    : rectifiedCanvas;
+  renderCanvasFit(displayCanvas, dom.rectifiedCanvas);
+  const targetCanvas = dom.rectifiedCanvas;
+  const scale = Math.min(targetCanvas.width / displayCanvas.width, targetCanvas.height / displayCanvas.height);
+  const drawW = displayCanvas.width * scale;
+  const drawH = displayCanvas.height * scale;
+  const offsetX = (targetCanvas.width - drawW) * 0.5;
+  const offsetY = (targetCanvas.height - drawH) * 0.5;
+  const ctx = targetCanvas.getContext("2d");
+  const margin = Math.max(0, Math.min(150, readConfig().paperMarginPx || 0));
+
+  ctx.save();
+  // Blue inset marks the part of the page that is excluded from the coarse cross sweeps.
+  ctx.strokeStyle = "rgba(0, 0, 255, 0.5)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(
+    offsetX + margin * scale + 0.5,
+    offsetY + margin * scale + 0.5,
+    Math.max(0, drawW - (margin * 2 * scale) - 1),
+    Math.max(0, drawH - (margin * 2 * scale) - 1)
+  );
+
+  const quad = state.geometry.pagePreviewGridQuad;
+  if (!quad) {
+    ctx.restore();
+    return;
+  }
+
+  // Red quad marks the coarse frame-grid bounds detected from the convolution profiles.
+  ctx.strokeStyle = "rgba(255, 0, 0, 0.5)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(offsetX + quad.tl.x * scale, offsetY + quad.tl.y * scale);
+  ctx.lineTo(offsetX + quad.tr.x * scale, offsetY + quad.tr.y * scale);
+  ctx.lineTo(offsetX + quad.br.x * scale, offsetY + quad.br.y * scale);
+  ctx.lineTo(offsetX + quad.bl.x * scale, offsetY + quad.bl.y * scale);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * Build the cross-kernel convolution diagnostic image for the current rectified-page preview.
+ *
+ * @param {HTMLCanvasElement} sourceCanvas
+ * @returns {HTMLCanvasElement}
+ */
+function getRectifiedConvolutionCanvas(sourceCanvas) {
+  return buildCrossConvolutionCanvas(sourceCanvas, state.preview.rectifiedDiagnosticCanvas);
 }
 
 /**
@@ -607,12 +892,12 @@ function invalidateFrameCaches() {
  * @returns {void}
  */
 function refreshAppearanceOutputs() {
-  if (!state.geometry.baseRectifiedCanvas) return;
+  if (!state.geometry.baseRectifiedPageCanvas) return;
   const filters = readConfig().filters;
   if (!hasAppearanceAdjustments(filters)) {
-    state.preview.rectifiedCanvas = state.geometry.baseRectifiedCanvas;
+    state.preview.rectifiedCanvas = state.geometry.baseRectifiedPageCanvas;
   } else {
-    applyVisualAdjustments(state.geometry.baseRectifiedCanvas, state.preview.adjustedRectifiedCanvas, filters);
+    applyVisualAdjustments(state.geometry.baseRectifiedPageCanvas, state.preview.adjustedRectifiedCanvas, filters);
     state.preview.rectifiedCanvas = state.preview.adjustedRectifiedCanvas;
   }
   renderRectifiedPreview(state.preview.rectifiedCanvas);
@@ -634,6 +919,8 @@ function getBaseFrameCanvas(index) {
     const cols = state.geometry.alignmentInfo.cols;
     const col = index % cols;
     const row = Math.floor(index / cols);
+    // Extraction stays lazy: pull just this frame from the rectified sheet, then apply
+    // post-crop output scaling without forcing the whole animation to be rebuilt.
     const frame = extractSingleFrameToCanvas(
       rectifiedMat,
       state.geometry.alignmentInfo,
@@ -642,11 +929,55 @@ function getBaseFrameCanvas(index) {
       config.crop,
       getCvInterpolationFlag(config.exportOptions.resampling)
     );
-    state.frames.base[index] = frame;
-    return frame;
+    const scaledFrame = scaleOutputCanvas(frame, config.exportOptions.outputScale, config.exportOptions.resampling);
+    state.frames.base[index] = scaledFrame;
+    return scaledFrame;
   } finally {
     rectifiedMat.delete();
   }
+}
+
+/**
+ * Compute the current post-crop, post-scale frame size shown in the Output Scale readout.
+ *
+ * @param {number} outputScale
+ * @returns {{width:number|string, height:number|string}}
+ */
+function getScaledOutputFrameSize(outputScale) {
+  const alignmentInfo = state.geometry.alignmentInfo;
+  if (!alignmentInfo) return { width: "--", height: "--" };
+  const config = readConfig();
+  const cellWidth = alignmentInfo.gridBounds.width / alignmentInfo.cols;
+  const cellHeight = alignmentInfo.gridBounds.height / alignmentInfo.rows;
+  const croppedWidth = Math.max(1, Math.round(cellWidth - config.crop.left - config.crop.right));
+  const croppedHeight = Math.max(1, Math.round(cellHeight - config.crop.top - config.crop.bottom));
+  return {
+    width: Math.max(1, Math.round(croppedWidth * outputScale)),
+    height: Math.max(1, Math.round(croppedHeight * outputScale)),
+  };
+}
+
+/**
+ * Apply the post-crop output scaling used by preview and GIF export.
+ *
+ * @param {HTMLCanvasElement} sourceCanvas
+ * @param {number} outputScale
+ * @param {string} resampling
+ * @returns {HTMLCanvasElement}
+ */
+function scaleOutputCanvas(sourceCanvas, outputScale, resampling) {
+  if (!sourceCanvas) return sourceCanvas;
+  const scale = Math.max(0.25, Math.min(1.0, outputScale || 1));
+  if (Math.abs(scale - 1) < 1e-6) return sourceCanvas;
+  const scaled = document.createElement("canvas");
+  scaled.width = Math.max(1, Math.round(sourceCanvas.width * scale));
+  scaled.height = Math.max(1, Math.round(sourceCanvas.height * scale));
+  const ctx = scaled.getContext("2d");
+  // Use browser scaling only for the final post-crop output-size change; geometric warps still happen in OpenCV.
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = (resampling === "linear") ? "medium" : "high";
+  ctx.drawImage(sourceCanvas, 0, 0, scaled.width, scaled.height);
+  return scaled;
 }
 
 /**
@@ -716,7 +1047,7 @@ function renderCrossRoiGrid(alignmentInfo) {
   for (let row = 0; row <= alignmentInfo.rows; row++) {
     for (let col = 0; col <= alignmentInfo.cols; col++) {
       const isCorner = ((col === 0) || (col === alignmentInfo.cols)) && ((row === 0) || (row === alignmentInfo.rows));
-      if (isCorner) {
+      if (isCorner && !alignmentInfo.includeCornerCrosses) {
         const spacer = document.createElement("div");
         spacer.className = "cross-roi-empty";
         grid.appendChild(spacer);
@@ -763,6 +1094,14 @@ function startGifPreviewLoop() {
  * @returns {void}
  */
 function drawCurrentGifPreview() {
+  if (state.export.url) {
+    // After export, this panel becomes a GIF viewer until some setting invalidates that GIF.
+    dom.gifPreviewCanvas.hidden = true;
+    updateAnimationPreviewHeading();
+    return;
+  }
+  dom.gifPreviewCanvas.hidden = false;
+  updateAnimationPreviewHeading();
   const frame = getAdjustedFrameCanvas(state.preview.frameIndex);
   if (!frame) {
     const ctx = dom.gifPreviewCanvas.getContext("2d");
@@ -792,12 +1131,14 @@ function rerenderPreviews() {
 async function exportGif() {
   if (!state.geometry.frameCount) return;
   dom.exportButton.disabled = true;
+  updateExportButtonLabel(0);
   setStatus("Encoding GIF…");
 
   const config = readConfig();
   const firstFrame = getAdjustedFrameCanvas(0);
   if (!firstFrame) {
     dom.exportButton.disabled = false;
+    updateExportButtonLabel();
     return;
   }
 
@@ -814,6 +1155,7 @@ async function exportGif() {
 
   const delay = Math.max(1, Math.round(1000 / config.fps));
   for (let i = 0; i < state.geometry.frameCount; i++) {
+    // Preview stays lazy, but export must realize the full adjusted frame set.
     gif.addFrame(getAdjustedFrameCanvas(i), { copy: true, delay });
   }
 
@@ -822,14 +1164,19 @@ async function exportGif() {
     state.export.filename = makeGifFilename(state.source.filename, config.exportOptions.quality);
     state.export.url = URL.createObjectURL(blob);
     dom.gifImage.src = state.export.url;
+    dom.gifPreviewCanvas.hidden = true;
     dom.gifImage.classList.remove("hidden");
     dom.gifImage.hidden = false;
+    updateAnimationPreviewHeading();
     downloadBlobWithFilename(blob, state.export.filename);
     dom.exportButton.disabled = false;
+    updateExportButtonLabel();
     setStatus("GIF ready.\nFrame count: " + state.geometry.frameCount);
   });
   gif.on("progress", (progress) => {
-    setStatus("Encoding GIF…\n" + Math.round(progress * 100) + "%");
+    const progressPercent = Math.round(progress * 100);
+    updateExportButtonLabel(progressPercent);
+    setStatus("Encoding GIF…\n" + progressPercent + "%");
   });
   gif.render();
 }
@@ -844,9 +1191,12 @@ function revokeGifUrl() {
   URL.revokeObjectURL(state.export.url);
   state.export.url = "";
   state.export.filename = "";
+  // Any settings change invalidates the exported GIF and returns the panel to live preview mode.
+  dom.gifPreviewCanvas.hidden = false;
   dom.gifImage.classList.add("hidden");
   dom.gifImage.hidden = true;
   dom.gifImage.removeAttribute("src");
+  updateAnimationPreviewHeading();
 }
 
 /**

@@ -4,6 +4,37 @@ const DOT_DIM_PCT_ROWS = 0.02;
 const GUTTER_PCT = 0.01;
 const MIN_CROSS_DETECTION_RATIO = 0.5;
 const MIN_CROSS_DETECTIONS_ABS = 4;
+const bUseCrossOnlyGridDetection = true;
+
+// Unnormalized matched-filter kernel for dark "+" registration marks on bright paper.
+// The negative total sum suppresses blank page areas while rewarding the orthogonal cross strokes.
+const crossKernel = [
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2],
+  [-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-4,-8,-4,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1],
+  [-4,-4,-4,-4,-4,-4,-4,-4,-4,-4,-4,-4,-8,-4,-4,-4,-4,-4,-4,-4,-4,-4,-4,-4,-4],
+  [-8,-8,-8,-8,-8,-8,-8,-8,-8,-8,-8,-8,-8,-8,-8,-8,-8,-8,-8,-8,-8,-8,-8,-8,-8],
+  [-4,-4,-4,-4,-4,-4,-4,-4,-4,-4,-4,-4,-8,-4,-4,-4,-4,-4,-4,-4,-4,-4,-4,-4,-4],
+  [-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-4,-8,-4,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1],
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,-1,-4,-8,-4,-1,2,2,2,2,2,2,2,2,2,2]
+];
 
 /**
  * Estimate the square ROI size used for cross-region inspection and detection.
@@ -27,6 +58,61 @@ export function estimateCrossRoiSidePx(gridWidth, gridHeight, cols, rows, crossR
 }
 
 /**
+ * Build a diagnostic image using the same monochrome + cross-kernel convolution path as the coarse detector.
+ *
+ * @param {HTMLCanvasElement} sourceCanvas
+ * @param {HTMLCanvasElement} targetCanvas
+ * @returns {HTMLCanvasElement}
+ */
+export function buildCrossConvolutionCanvas(sourceCanvas, targetCanvas) {
+  const src = cv.imread(sourceCanvas);
+  const gray = new cv.Mat();
+  const src32 = new cv.Mat();
+  const conv32 = new cv.Mat();
+  const conv8 = new cv.Mat();
+  const kernelMat = cv.matFromArray(25, 25, cv.CV_32F, crossKernel.flat());
+
+  try {
+    // Match the coarse detector exactly so the diagnostic view is a faithful preview of the sweep signal.
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    gray.convertTo(src32, cv.CV_32F);
+    cv.filter2D(src32, conv32, cv.CV_32F, kernelMat, new cv.Point(-1, -1), 0, cv.BORDER_CONSTANT);
+
+    // The kernel sum is negative, so a bright blank page produces a large negative response.
+    // For diagnostics we want the same "bright cross hits, dark background" signal used by the sweeps,
+    // not the absolute value, which would turn the whole page white.
+    clampPositiveConvolutionToUint8(conv32, conv8);
+    cv.imshow(targetCanvas, conv8);
+    return targetCanvas;
+  } finally {
+    src.delete();
+    gray.delete();
+    src32.delete();
+    conv32.delete();
+    conv8.delete();
+    kernelMat.delete();
+  }
+}
+
+/**
+ * Convert a float convolution image into an 8-bit display/sweep image by clamping negative values to 0
+ * and positive values to 255.
+ *
+ * @param {cv.Mat} conv32
+ * @param {cv.Mat} target8
+ * @returns {void}
+ */
+function clampPositiveConvolutionToUint8(conv32, target8) {
+  target8.create(conv32.rows, conv32.cols, cv.CV_8UC1);
+  const src = conv32.data32F;
+  const dst = target8.data;
+  for (let i = 0; i < src.length; i++) {
+    const value = src[i];
+    dst[i] = value <= 0 ? 0 : (value >= 255 ? 255 : Math.round(value));
+  }
+}
+
+/**
  * Run the full page-detection, rectification, alignment, and frame-extraction pipeline.
  *
  * @param {HTMLCanvasElement} sourceCanvas
@@ -36,6 +122,8 @@ export function estimateCrossRoiSidePx(gridWidth, gridHeight, cols, rows, crossR
  * @returns {{
  *   frames: HTMLCanvasElement[],
  *   rectifiedCanvas: HTMLCanvasElement,
+ *   pagePreviewCanvas: HTMLCanvasElement,
+ *   pagePreviewGridQuad: {tl:{x:number,y:number}, tr:{x:number,y:number}, br:{x:number,y:number}, bl:{x:number,y:number}} | null,
  *   alignmentInfo: object,
  *   statusText: string,
  *   pageQuadPoints: {x:number, y:number}[]
@@ -46,6 +134,11 @@ export function runPipeline(sourceCanvas, config, requestId, throwIfAborted) {
   const styledSrc = cv.imread(sourceCanvas);
   const grayImg = new cv.Mat();
   const thresh = new cv.Mat();
+  let pageQuad = null;
+  let pageWarpLow = null;
+  let pageWarpHigh = null;
+  let rectifiedWarp = null;
+  let pageWarpPreviewCanvas = null;
 
   try {
     // Segment the bright paper sheet from the darker surroundings.
@@ -55,7 +148,7 @@ export function runPipeline(sourceCanvas, config, requestId, throwIfAborted) {
     throwIfAborted(requestId);
 
     // Detect the page quadrilateral in raw-photo coordinates.
-    const pageQuad = findLargestQuad(thresh, sourceCanvas.width * sourceCanvas.height);
+    pageQuad = findLargestQuad(thresh, sourceCanvas.width * sourceCanvas.height);
     const ordered = orderCorners(pageQuad.points);
     throwIfAborted(requestId);
 
@@ -70,39 +163,29 @@ export function runPipeline(sourceCanvas, config, requestId, throwIfAborted) {
       config.paperHeightIn,
       pageSizeLow
     );
-    const pageWarpLow = perspectiveWarp(visionSrc, styledSrc, ordered, pageSizeLow);
-    const pageWarpHigh = perspectiveWarp(visionSrc, styledSrc, ordered, pageSizeHigh);
+    pageWarpLow = perspectiveWarp(visionSrc, styledSrc, ordered, pageSizeLow);
+    pageWarpHigh = perspectiveWarp(visionSrc, styledSrc, ordered, pageSizeHigh);
+    pageWarpPreviewCanvas = matToCanvas(pageWarpHigh.styledMat);
     throwIfAborted(requestId);
 
-    // Find the corner circles in the low-res page warp, then scale that geometry into the high-res warp.
-    const lightnessLow = toLightnessGray(pageWarpLow.visionMat);
-    const dotRectLow = findDotRect(lightnessLow);
-    lightnessLow.delete();
-    const dotRectHigh = scaleDotRect(dotRectLow, pageSizeLow, pageSizeHigh);
-    throwIfAborted(requestId);
-
-    // Rectify the sheet from the four corner circles, leaving padding for edge cross-region sampling.
-    const rectifiedSize = estimateRectifiedSize(dotRectHigh);
-    const detectionPadding = estimateDetectionPadding(
-      rectifiedSize.width,
-      rectifiedSize.height,
-      config.frameCols,
-      config.frameRows,
-      config.crossRoiScale
-    );
+    // Keep both grid-finding pipelines available while the cross-only detector is being validated.
     const useRectifiedAsSource = config.useRectifiedAsSource;
-    const finalDotRect = useRectifiedAsSource
-      ? dotRectHigh
-      : mapDotRectThroughHomography(dotRectHigh, pageWarpHigh.inverseTransform);
-    const finalVisionSource = useRectifiedAsSource ? pageWarpHigh.visionMat : visionSrc;
-    const finalStyledSource = useRectifiedAsSource ? pageWarpHigh.styledMat : styledSrc;
-    const rectifiedWarp = rectifyByDots(
-      finalVisionSource,
-      finalStyledSource,
-      finalDotRect,
-      rectifiedSize,
-      detectionPadding
-    );
+    rectifiedWarp = bUseCrossOnlyGridDetection
+      ? buildFrameGridRectification_fromCrosses(
+          visionSrc,
+          styledSrc,
+          pageWarpHigh,
+          config,
+          useRectifiedAsSource
+        )
+      : buildFrameGridRectification_old(
+          visionSrc,
+          styledSrc,
+          pageWarpLow,
+          pageWarpHigh,
+          config,
+          useRectifiedAsSource
+        );
     throwIfAborted(requestId);
 
     // Resolve the cross lattice if enabled; otherwise keep the nominal grid and unrefined ROI views.
@@ -112,7 +195,8 @@ export function runPipeline(sourceCanvas, config, requestId, throwIfAborted) {
           config.frameCols,
           config.frameRows,
           config.crossRoiScale,
-          rectifiedWarp.gridBounds
+          rectifiedWarp.gridBounds,
+          { includeCornerCrosses: rectifiedWarp.includeCornerCrosses }
         )
       : buildUnrefinedCrossRegionInfo(
           rectifiedWarp.visionMat,
@@ -120,8 +204,14 @@ export function runPipeline(sourceCanvas, config, requestId, throwIfAborted) {
           config.frameRows,
           "disabled",
           rectifiedWarp.gridBounds,
-          config.crossRoiScale
+          config.crossRoiScale,
+          { includeCornerCrosses: rectifiedWarp.includeCornerCrosses }
         );
+    // In the all-cross format, the coarse quad is only approximate; use the detected corner crosses
+    // to tighten the working grid bounds before frame extraction.
+    if (rectifiedWarp.includeCornerCrosses) {
+      refineAlignmentBoundsFromCornerCrosses(alignmentInfo);
+    }
     throwIfAborted(requestId);
 
     // Extract each animation frame from the styled rectified sheet with the chosen interpolation mode.
@@ -150,28 +240,124 @@ export function runPipeline(sourceCanvas, config, requestId, throwIfAborted) {
       animationWidth: frames[0]?.width || 0,
       animationHeight: frames[0]?.height || 0,
       sourceMode: useRectifiedAsSource ? "rectified" : "raw photo",
+      gridDetector: rectifiedWarp.includeCornerCrosses ? "cross-only" : "corner dots",
     });
-
-    rectifiedWarp.visionMat.delete();
-    rectifiedWarp.styledMat.delete();
-    pageWarpLow.visionMat.delete();
-    pageWarpLow.styledMat.delete();
-    pageWarpHigh.visionMat.delete();
-    pageWarpHigh.styledMat.delete();
 
     return {
       frames,
       rectifiedCanvas,
+      pagePreviewCanvas: pageWarpPreviewCanvas,
+      pagePreviewGridQuad: rectifiedWarp.previewGridQuad || null,
       alignmentInfo,
       statusText,
       pageQuadPoints: pageQuad.points,
     };
+  } catch (error) {
+    if (error?.name !== "ProcessAbortedError") {
+      error.partialResult = {
+        pageQuadPoints: pageQuad?.points || null,
+        rectifiedCanvas: pageWarpPreviewCanvas,
+      };
+    }
+    throw error;
   } finally {
+    rectifiedWarp?.visionMat?.delete();
+    rectifiedWarp?.styledMat?.delete();
+    pageWarpLow?.visionMat?.delete();
+    pageWarpLow?.styledMat?.delete();
+    pageWarpHigh?.visionMat?.delete();
+    pageWarpHigh?.styledMat?.delete();
     visionSrc.delete();
     styledSrc.delete();
     grayImg.delete();
     thresh.delete();
   }
+}
+
+/**
+ * Legacy frame-grid detector based on the four circular corner markers.
+ *
+ * @param {cv.Mat} visionSrc
+ * @param {cv.Mat} styledSrc
+ * @param {{visionMat:cv.Mat, styledMat:cv.Mat}} pageWarpLow
+ * @param {{visionMat:cv.Mat, styledMat:cv.Mat, inverseTransform:number[]}} pageWarpHigh
+ * @param {object} config
+ * @param {boolean} useRectifiedAsSource
+ * @returns {{visionMat:cv.Mat, styledMat:cv.Mat, gridBounds:{left:number, top:number, width:number, height:number}, includeCornerCrosses:boolean}}
+ */
+function buildFrameGridRectification_old(visionSrc, styledSrc, pageWarpLow, pageWarpHigh, config, useRectifiedAsSource) {
+  // Legacy path: find the corner circles in the low-res page warp, then scale them into the extraction warp.
+  const lightnessLow = toLightnessGray(pageWarpLow.visionMat);
+  const dotRectLow = findDotRect_old(lightnessLow);
+  lightnessLow.delete();
+  const dotRectHigh = scaleDotRect(dotRectLow, new cv.Size(pageWarpLow.visionMat.cols, pageWarpLow.visionMat.rows), new cv.Size(pageWarpHigh.visionMat.cols, pageWarpHigh.visionMat.rows));
+  const rectifiedSize = estimateRectifiedSize_old(dotRectHigh);
+  const detectionPadding = estimateDetectionPadding(
+    rectifiedSize.width,
+    rectifiedSize.height,
+    config.frameCols,
+    config.frameRows,
+    config.crossRoiScale
+  );
+  const finalDotRect = useRectifiedAsSource
+    ? dotRectHigh
+    : mapQuadThroughHomography(dotRectHigh, pageWarpHigh.inverseTransform);
+  const finalVisionSource = useRectifiedAsSource ? pageWarpHigh.visionMat : visionSrc;
+  const finalStyledSource = useRectifiedAsSource ? pageWarpHigh.styledMat : styledSrc;
+  const rectifiedWarp = rectifyByDots_old(
+    finalVisionSource,
+    finalStyledSource,
+    finalDotRect,
+    rectifiedSize,
+    detectionPadding
+  );
+  return { ...rectifiedWarp, includeCornerCrosses: false, previewGridQuad: dotRectHigh };
+}
+
+/**
+ * New frame-grid detector based only on the cross lattice.
+ *
+ * @param {cv.Mat} visionSrc
+ * @param {cv.Mat} styledSrc
+ * @param {{visionMat:cv.Mat, styledMat:cv.Mat, inverseTransform:number[]}} pageWarpHigh
+ * @param {object} config
+ * @param {boolean} useRectifiedAsSource
+ * @returns {{visionMat:cv.Mat, styledMat:cv.Mat, gridBounds:{left:number, top:number, width:number, height:number}, includeCornerCrosses:boolean}}
+ */
+function buildFrameGridRectification_fromCrosses(visionSrc, styledSrc, pageWarpHigh, config, useRectifiedAsSource) {
+  // New path: detect the frame-grid bounds directly from cross activity instead of corner circles.
+  const coarseGridQuadHigh = findFrameGridQuadFromCrosses(
+    pageWarpHigh.visionMat,
+    config.frameCols,
+    config.frameRows,
+    {
+      paperMarginPx: config.paperMarginPx,
+      boundarySensitivity: config.boundarySensitivity,
+      boundaryPersistencePx: config.boundaryPersistencePx,
+    }
+  );
+  const rectifiedSize = estimateRectifiedSizeFromQuad(coarseGridQuadHigh);
+  const detectionPadding = estimateDetectionPadding(
+    rectifiedSize.width,
+    rectifiedSize.height,
+    config.frameCols,
+    config.frameRows,
+    config.crossRoiScale
+  );
+  const finalGridQuad = useRectifiedAsSource
+    ? coarseGridQuadHigh
+    : mapQuadThroughHomography(coarseGridQuadHigh, pageWarpHigh.inverseTransform);
+  const finalVisionSource = useRectifiedAsSource ? pageWarpHigh.visionMat : visionSrc;
+  const finalStyledSource = useRectifiedAsSource ? pageWarpHigh.styledMat : styledSrc;
+  // Rectify the coarse grid region itself; later cross localization refines the exact lattice inside it.
+  const rectifiedWarp = rectifyByQuad(
+    finalVisionSource,
+    finalStyledSource,
+    finalGridQuad,
+    rectifiedSize,
+    detectionPadding
+  );
+  return { ...rectifiedWarp, includeCornerCrosses: true, previewGridQuad: coarseGridQuadHigh };
 }
 
 /**
@@ -395,13 +581,150 @@ function applyHomographyToPoint(point, homography) {
  * @param {number[]} homography
  * @returns {{tl:{x:number,y:number}, tr:{x:number,y:number}, br:{x:number,y:number}, bl:{x:number,y:number}}}
  */
-function mapDotRectThroughHomography(dotRect, homography) {
+function mapQuadThroughHomography(quad, homography) {
   return {
-    tl: applyHomographyToPoint(dotRect.tl, homography),
-    tr: applyHomographyToPoint(dotRect.tr, homography),
-    br: applyHomographyToPoint(dotRect.br, homography),
-    bl: applyHomographyToPoint(dotRect.bl, homography),
+    tl: applyHomographyToPoint(quad.tl, homography),
+    tr: applyHomographyToPoint(quad.tr, homography),
+    br: applyHomographyToPoint(quad.br, homography),
+    bl: applyHomographyToPoint(quad.bl, homography),
   };
+}
+
+/**
+ * Coarsely locate the frame-grid rectangle using only the cross lattice.
+ *
+ * @param {cv.Mat} pageMat
+ * @param {number} cols
+ * @param {number} rows
+ * @param {{paperMarginPx?:number, boundarySensitivity?:number, boundaryPersistencePx?:number}} [options={}]
+ * @returns {{tl:{x:number,y:number}, tr:{x:number,y:number}, br:{x:number,y:number}, bl:{x:number,y:number}}}
+ */
+function findFrameGridQuadFromCrosses(pageMat, cols, rows, options = {}) {
+  const gray = toGrayNoBlur(pageMat);
+  const src32 = new cv.Mat();
+  const conv32 = new cv.Mat();
+  const kernelMat = cv.matFromArray(25, 25, cv.CV_32F, crossKernel.flat());
+  let roi = null;
+
+  try {
+    const insetPx = Math.max(0, Math.min(150, options.paperMarginPx ?? 80));
+    const roiWidth = Math.max(1, gray.cols - insetPx * 2);
+    const roiHeight = Math.max(1, gray.rows - insetPx * 2);
+    // Ignore a tunable paper margin so page-edge clutter does not pollute the boundary sweeps.
+    roi = gray.roi(new cv.Rect(insetPx, insetPx, roiWidth, roiHeight));
+    roi.convertTo(src32, cv.CV_32F);
+    // Keep the cross kernel unnormalized so true cross matches produce the strongest response.
+    cv.filter2D(src32, conv32, cv.CV_32F, kernelMat, new cv.Point(-1, -1), 0, cv.BORDER_CONSTANT);
+
+    // Sweep the 1D profiles across the convolution response to locate the first outer cross band on each side.
+    const profiles = computeCrossActivityProfilesFromConvolution(conv32);
+    const riseOptions = {
+      insetPx: 0,
+      sustainPx: options.boundaryPersistencePx ?? 7,
+      thresholdValue: options.boundarySensitivity ?? 8,
+    };
+    const left = findFirstRiseFromEdge(profiles.colActivity, "left", riseOptions);
+    const right = findFirstRiseFromEdge(profiles.colActivity, "right", riseOptions);
+    const top = findFirstRiseFromEdge(profiles.rowActivity, "top", riseOptions);
+    const bottom = findFirstRiseFromEdge(profiles.rowActivity, "bottom", riseOptions);
+
+    // Keep the first threshold crossings as the coarse frame bounds; later ROI logic already
+    // adds the extra breathing room needed for outer cross inspection.
+    const coarseLeft = left;
+    const coarseRight = right;
+    const coarseTop = top;
+    const coarseBottom = bottom;
+
+    return {
+      tl: { x: insetPx + coarseLeft, y: insetPx + coarseTop },
+      tr: { x: insetPx + coarseRight, y: insetPx + coarseTop },
+      br: { x: insetPx + coarseRight, y: insetPx + coarseBottom },
+      bl: { x: insetPx + coarseLeft, y: insetPx + coarseBottom },
+    };
+  } finally {
+    roi?.delete();
+    gray.delete();
+    src32.delete();
+    conv32.delete();
+    kernelMat.delete();
+  }
+}
+
+/**
+ * Build row/column activity profiles from the cross-kernel convolution response.
+ *
+ * The kernel is intentionally unnormalized, so clamp the response into 0..255
+ * before averaging in order to keep extreme values from dominating the sweeps.
+ *
+ * @param {cv.Mat} conv32
+ * @returns {{colActivity: Float64Array, rowActivity: Float64Array}}
+ */
+function computeCrossActivityProfilesFromConvolution(conv32) {
+  const width = conv32.cols;
+  const height = conv32.rows;
+  const colActivity = new Float64Array(width);
+  const rowActivity = new Float64Array(height);
+  const data = conv32.data32F;
+
+  // Collapse the 2D convolution image into one average-response profile per axis.
+  for (let y = 0; y < height; y++) {
+    const rowOffset = y * width;
+    for (let x = 0; x < width; x++) {
+      const idx = rowOffset + x;
+      const value = Math.max(0, Math.min(255, data[idx]));
+      colActivity[x] += value;
+      rowActivity[y] += value;
+    }
+  }
+
+  // Convert sums into average grayscale response per column/row so thresholds are less image-size dependent.
+  for (let x = 0; x < width; x++) {
+    colActivity[x] /= Math.max(1, height);
+  }
+  for (let y = 0; y < height; y++) {
+    rowActivity[y] /= Math.max(1, width);
+  }
+
+  return {
+    colActivity,
+    rowActivity,
+  };
+}
+
+/**
+ * Find the first sustained activation rise from one edge of a 1D profile.
+ *
+ * @param {ArrayLike<number>} profile
+ * @param {"left"|"right"|"top"|"bottom"} edge
+ * @param {{insetPx?:number, sustainPx?:number, thresholdValue?:number}} [options={}]
+ * @returns {number}
+ */
+function findFirstRiseFromEdge(profile, edge, options = {}) {
+  const n = profile.length;
+  const insetPx = options.insetPx ?? 50;
+  const sustainPx = options.sustainPx ?? Math.max(4, Math.round(n * 0.01));
+  const threshold = Math.max(0, options.thresholdValue ?? 8);
+  const forward = (edge === "left") || (edge === "top");
+  const start = forward ? insetPx : (n - 1 - insetPx);
+  const stop = forward ? (n - sustainPx) : (sustainPx - 1);
+  const step = forward ? 1 : -1;
+
+  // Accept the first run of consecutive samples that all exceed the chosen threshold.
+  for (let i = start; forward ? (i <= stop) : (i >= stop); i += step) {
+    let active = true;
+    for (let k = 0; k < sustainPx; k++) {
+      const j = i + k * step;
+      if ((j < 0) || (j >= n) || (profile[j] < threshold)) {
+        active = false;
+        break;
+      }
+    }
+    if (active) {
+      return i;
+    }
+  }
+
+  throw new Error("Could not locate frame grid from " + edge + " edge.");
 }
 
 /**
@@ -410,7 +733,7 @@ function mapDotRectThroughHomography(dotRect, homography) {
  * @param {cv.Mat} pageGrayMat
  * @returns {{tl:{x:number,y:number}, tr:{x:number,y:number}, br:{x:number,y:number}, bl:{x:number,y:number}}}
  */
-function findDotRect(pageGrayMat) {
+function findDotRect_old(pageGrayMat) {
   const cols = columnSums(pageGrayMat);
   const rows = rowSums(pageGrayMat);
   // The plot format guarantees a blank gutter outside each corner circle, so we search for a dip then verify the blank run beyond it.
@@ -453,11 +776,26 @@ function findDotRect(pageGrayMat) {
  * @param {{tl:{x:number,y:number}, tr:{x:number,y:number}, br:{x:number,y:number}, bl:{x:number,y:number}}} dotRect
  * @returns {cv.Size}
  */
-function estimateRectifiedSize(dotRect) {
+function estimateRectifiedSize_old(dotRect) {
   const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   return new cv.Size(
     Math.round((dist(dotRect.tl, dotRect.tr) + dist(dotRect.bl, dotRect.br)) * 0.5),
     Math.round((dist(dotRect.tl, dotRect.bl) + dist(dotRect.tr, dotRect.br)) * 0.5)
+  );
+}
+
+/**
+ * Estimate the rectified grid size from a generic quadrilateral.
+ *
+ * @param {{tl:{x:number,y:number}, tr:{x:number,y:number}, br:{x:number,y:number}, bl:{x:number,y:number}}} quad
+ * @returns {cv.Size}
+ */
+function estimateRectifiedSizeFromQuad(quad) {
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  // Average opposite sides so minor residual skew or paper curl does not dominate the output size.
+  return new cv.Size(
+    Math.round((dist(quad.tl, quad.tr) + dist(quad.bl, quad.br)) * 0.5),
+    Math.round((dist(quad.tl, quad.bl) + dist(quad.tr, quad.br)) * 0.5)
   );
 }
 
@@ -488,12 +826,26 @@ function estimateDetectionPadding(rectifiedWidth, rectifiedHeight, cols, rows, c
  * @param {number} [padding=0]
  * @returns {{visionMat:cv.Mat, styledMat:cv.Mat, gridBounds:{left:number, top:number, width:number, height:number}}}
  */
-function rectifyByDots(pageVision, pageStyled, dotRect, size, padding = 0) {
+function rectifyByDots_old(pageVision, pageStyled, dotRect, size, padding = 0) {
+  return rectifyByQuad(pageVision, pageStyled, dotRect, size, padding);
+}
+
+/**
+ * Rectify an arbitrary axis-aligned frame-grid quadrilateral into working coordinates.
+ *
+ * @param {cv.Mat} pageVision
+ * @param {cv.Mat} pageStyled
+ * @param {{tl:{x:number,y:number}, tr:{x:number,y:number}, br:{x:number,y:number}, bl:{x:number,y:number}}} quad
+ * @param {cv.Size} size
+ * @param {number} [padding=0]
+ * @returns {{visionMat:cv.Mat, styledMat:cv.Mat, gridBounds:{left:number, top:number, width:number, height:number}}}
+ */
+function rectifyByQuad(pageVision, pageStyled, quad, size, padding = 0) {
   const srcCorners = cv.matFromArray(4, 1, cv.CV_32FC2, [
-    dotRect.tl.x, dotRect.tl.y,
-    dotRect.tr.x, dotRect.tr.y,
-    dotRect.br.x, dotRect.br.y,
-    dotRect.bl.x, dotRect.bl.y,
+    quad.tl.x, quad.tl.y,
+    quad.tr.x, quad.tr.y,
+    quad.br.x, quad.br.y,
+    quad.bl.x, quad.bl.y,
   ]);
   const dstCorners = cv.matFromArray(4, 1, cv.CV_32FC2, [
     padding, padding,
@@ -505,6 +857,7 @@ function rectifyByDots(pageVision, pageStyled, dotRect, size, padding = 0) {
   const visionMat = new cv.Mat();
   const styledMat = new cv.Mat();
   const expandedSize = new cv.Size(size.width + padding * 2, size.height + padding * 2);
+  // Replicated borders keep the outer ROI windows valid even when a cross lands on the rectified edge.
   cv.warpPerspective(pageVision, visionMat, transform, expandedSize, cv.INTER_LINEAR, cv.BORDER_REPLICATE);
   cv.warpPerspective(pageStyled, styledMat, transform, expandedSize, cv.INTER_LINEAR, cv.BORDER_REPLICATE);
   srcCorners.delete();
@@ -673,6 +1026,24 @@ function toLightnessGray(inMat) {
   }
   const k = Math.max(3, (Math.min(grayMat.rows, grayMat.cols) / 400) | 1);
   cv.GaussianBlur(grayMat, grayMat, new cv.Size(k, k), 0, 0, cv.BORDER_REPLICATE);
+  return grayMat;
+}
+
+/**
+ * Convert to grayscale without any additional blur.
+ *
+ * @param {cv.Mat} inMat
+ * @returns {cv.Mat}
+ */
+function toGrayNoBlur(inMat) {
+  const grayMat = new cv.Mat();
+  if (inMat.type() === cv.CV_8UC4) {
+    cv.cvtColor(inMat, grayMat, cv.COLOR_RGBA2GRAY);
+  } else if (inMat.type() === cv.CV_8UC3) {
+    cv.cvtColor(inMat, grayMat, cv.COLOR_BGR2GRAY);
+  } else {
+    throw new Error("Expected a 3- or 4-channel Mat.");
+  }
   return grayMat;
 }
 
@@ -886,14 +1257,16 @@ function findFirstDipFromEdge(profile, edge, options = {}) {
  * @param {object | null} [detectedInfo=null]
  * @returns {object}
  */
-function buildFallbackFrameExtractionData(rectifiedMat, cols, rows, reason = "fallback", gridBounds = null, detectedInfo = null) {
+function buildFallbackFrameExtractionData(rectifiedMat, cols, rows, reason = "fallback", gridBounds = null, detectedInfo = null, options = {}) {
+  const includeCornerCrosses = !!options.includeCornerCrosses;
   const bounds = gridBounds || { left: 0, top: 0, width: rectifiedMat.cols, height: rectifiedMat.rows };
-  const expectedCrosses = getExpectedCrossLattice(bounds, cols, rows);
-  const anchorDots = getRectifiedCornerAnchors(bounds, cols, rows);
+  const expectedCrosses = getExpectedCrossLattice(bounds, cols, rows, includeCornerCrosses);
+  const anchorDots = includeCornerCrosses ? [] : getRectifiedCornerAnchors_old(bounds, cols, rows);
   const markerLookup = buildMarkerLookup(expectedCrosses, [], anchorDots, cols, rows);
   return {
     ok: false,
     reason,
+    includeCornerCrosses,
     rectifiedWidth: rectifiedMat.cols,
     rectifiedHeight: rectifiedMat.rows,
     gridBounds: bounds,
@@ -923,10 +1296,11 @@ function buildFallbackFrameExtractionData(rectifiedMat, cols, rows, reason = "fa
  * @param {number} [crossRoiScale=0.75]
  * @returns {object}
  */
-function buildUnrefinedCrossRegionInfo(rectifiedMat, cols, rows, reason = "disabled", gridBounds = null, crossRoiScale = 0.75) {
+function buildUnrefinedCrossRegionInfo(rectifiedMat, cols, rows, reason = "disabled", gridBounds = null, crossRoiScale = 0.75, options = {}) {
+  const includeCornerCrosses = !!options.includeCornerCrosses;
   const bounds = gridBounds || { left: 0, top: 0, width: rectifiedMat.cols, height: rectifiedMat.rows };
-  const expectedCrosses = getExpectedCrossLattice(bounds, cols, rows);
-  const anchorDots = getRectifiedCornerAnchors(bounds, cols, rows);
+  const expectedCrosses = getExpectedCrossLattice(bounds, cols, rows, includeCornerCrosses);
+  const anchorDots = includeCornerCrosses ? [] : getRectifiedCornerAnchors_old(bounds, cols, rows);
   const markerLookup = buildMarkerLookup(expectedCrosses, [], anchorDots, cols, rows);
   const crossRoiTiles = expectedCrosses.map((expected) =>
     buildUnrefinedCrossRegionTile(rectifiedMat, expected, rectifiedMat.cols, rectifiedMat.rows, cols, rows, crossRoiScale)
@@ -934,6 +1308,7 @@ function buildUnrefinedCrossRegionInfo(rectifiedMat, cols, rows, reason = "disab
   return {
     ok: false,
     reason,
+    includeCornerCrosses,
     rectifiedWidth: rectifiedMat.cols,
     rectifiedHeight: rectifiedMat.rows,
     gridBounds: bounds,
@@ -962,13 +1337,14 @@ function buildUnrefinedCrossRegionInfo(rectifiedMat, cols, rows, reason = "disab
  * @param {{left:number, top:number, width:number, height:number} | null} [gridBounds=null]
  * @returns {object}
  */
-function buildCrossAlignmentData(rectifiedMat, cols, rows, crossRoiScale = 0.75, gridBounds = null) {
+function buildCrossAlignmentData(rectifiedMat, cols, rows, crossRoiScale = 0.75, gridBounds = null, options = {}) {
+  const includeCornerCrosses = !!options.includeCornerCrosses;
   const bounds = gridBounds || { left: 0, top: 0, width: rectifiedMat.cols, height: rectifiedMat.rows };
-  const expectedCrosses = getExpectedCrossLattice(bounds, cols, rows);
+  const expectedCrosses = getExpectedCrossLattice(bounds, cols, rows, includeCornerCrosses);
   if (expectedCrosses.length === 0) {
-    return buildFallbackFrameExtractionData(rectifiedMat, cols, rows, "no crosses expected", bounds);
+    return buildFallbackFrameExtractionData(rectifiedMat, cols, rows, "no crosses expected", bounds, null, { includeCornerCrosses });
   }
-  const anchorDots = getRectifiedCornerAnchors(bounds, cols, rows);
+  const anchorDots = includeCornerCrosses ? [] : getRectifiedCornerAnchors_old(bounds, cols, rows);
   const grayMat = toLightnessGray(rectifiedMat);
   const detectedCrosses = [];
   const rejectedCrosses = [];
@@ -995,6 +1371,7 @@ function buildCrossAlignmentData(rectifiedMat, cols, rows, crossRoiScale = 0.75,
   return {
     ok,
     reason: ok ? "ok" : `too few confident detections (${detectedCrosses.length}/${expectedCrosses.length})`,
+    includeCornerCrosses,
     rectifiedWidth: rectifiedMat.cols,
     rectifiedHeight: rectifiedMat.rows,
     gridBounds: bounds,
@@ -1021,12 +1398,12 @@ function buildCrossAlignmentData(rectifiedMat, cols, rows, crossRoiScale = 0.75,
  * @param {number} rows
  * @returns {{col:number, row:number, x:number, y:number}[]}
  */
-function getExpectedCrossLattice(bounds, cols, rows) {
+function getExpectedCrossLattice(bounds, cols, rows, includeCornerCrosses = false) {
   const points = [];
   for (let row = 0; row <= rows; row++) {
     for (let col = 0; col <= cols; col++) {
       const isCorner = ((col === 0) || (col === cols)) && ((row === 0) || (row === rows));
-      if (isCorner) continue;
+      if (isCorner && !includeCornerCrosses) continue;
       points.push({ col, row, x: bounds.left + bounds.width * (col / cols), y: bounds.top + bounds.height * (row / rows) });
     }
   }
@@ -1041,7 +1418,7 @@ function getExpectedCrossLattice(bounds, cols, rows) {
  * @param {number} rows
  * @returns {object[]}
  */
-function getRectifiedCornerAnchors(bounds, cols, rows) {
+function getRectifiedCornerAnchors_old(bounds, cols, rows) {
   return [
     { kind: "dot", col: 0, row: 0, x: bounds.left, y: bounds.top, detectedX: bounds.left, detectedY: bounds.top, dx: 0, dy: 0, confidence: 10, accepted: true },
     { kind: "dot", col: cols, row: 0, x: bounds.left + bounds.width, y: bounds.top, detectedX: bounds.left + bounds.width, detectedY: bounds.top, dx: 0, dy: 0, confidence: 10, accepted: true },
@@ -1293,16 +1670,40 @@ function buildMarkerLookup(expectedCrosses, detectedCrosses, anchorDots, cols, r
     });
   }
   for (const cross of detectedCrosses) lookup.set(getMarkerKey(cross.col, cross.row), cross);
-  const corners = [
-    { col: 0, row: 0, dot: anchorDots[0] },
-    { col: cols, row: 0, dot: anchorDots[1] },
-    { col: cols, row: rows, dot: anchorDots[2] },
-    { col: 0, row: rows, dot: anchorDots[3] },
-  ];
-  for (const corner of corners) {
-    lookup.set(getMarkerKey(corner.col, corner.row), { ...corner.dot, col: corner.col, row: corner.row });
+  if (anchorDots.length >= 4) {
+    const corners = [
+      { col: 0, row: 0, dot: anchorDots[0] },
+      { col: cols, row: 0, dot: anchorDots[1] },
+      { col: cols, row: rows, dot: anchorDots[2] },
+      { col: 0, row: rows, dot: anchorDots[3] },
+    ];
+    for (const corner of corners) {
+      lookup.set(getMarkerKey(corner.col, corner.row), { ...corner.dot, col: corner.col, row: corner.row });
+    }
   }
   return lookup;
+}
+
+/**
+ * Tighten grid bounds to the detected corner crosses in the all-cross registration mode.
+ *
+ * @param {object} alignmentInfo
+ * @returns {void}
+ */
+function refineAlignmentBoundsFromCornerCrosses(alignmentInfo) {
+  if (!alignmentInfo?.includeCornerCrosses) return;
+  const tl = alignmentInfo.markerLookup.get(getMarkerKey(0, 0));
+  const tr = alignmentInfo.markerLookup.get(getMarkerKey(alignmentInfo.cols, 0));
+  const br = alignmentInfo.markerLookup.get(getMarkerKey(alignmentInfo.cols, alignmentInfo.rows));
+  const bl = alignmentInfo.markerLookup.get(getMarkerKey(0, alignmentInfo.rows));
+  if (!tl || !tr || !br || !bl) return;
+
+  alignmentInfo.gridBounds = {
+    left: (tl.detectedX + bl.detectedX) * 0.5,
+    top: (tl.detectedY + tr.detectedY) * 0.5,
+    width: ((tr.detectedX - tl.detectedX) + (br.detectedX - bl.detectedX)) * 0.5,
+    height: ((bl.detectedY - tl.detectedY) + (br.detectedY - tr.detectedY)) * 0.5,
+  };
 }
 
 /**
@@ -1415,16 +1816,18 @@ function buildStatusText({
   animationWidth,
   animationHeight,
   sourceMode,
+  gridDetector,
 }) {
   const lines = [
-    "Raw photo: " + rawWidth + " x " + rawHeight,
+    "Raw photo: " + rawWidth + " × " + rawHeight,
     "Paper threshold: " + threshVal + "/255",
     "Largest contour area: " + (pageAreaPct * 100).toFixed(1) + "%",
-    "Detection warp: " + pageWarpWidth + " x " + pageWarpHeight,
-    "Extraction warp: " + highPageWarpWidth + " x " + highPageWarpHeight,
-    "Rectified sheet: " + rectifiedWidth + " x " + rectifiedHeight,
-    "Animation size: " + animationWidth + " x " + animationHeight,
+    "Detection warp: " + pageWarpWidth + " × " + pageWarpHeight,
+    "Extraction warp: " + highPageWarpWidth + " × " + highPageWarpHeight,
+    "Rectified sheet: " + rectifiedWidth + " × " + rectifiedHeight,
+    "Animation size: " + animationWidth + " × " + animationHeight,
     "Frame source: " + sourceMode,
+    "Grid detector: " + gridDetector,
     "Frames extracted: " + frameCount,
   ];
 
