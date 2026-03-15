@@ -1,0 +1,109 @@
+/**
+ * Preset paper dimensions used only for aspect ratio and UI convenience.
+ */
+export const PAPER_PRESETS = {
+  letter: { width: 11, height: 8.5 },
+  legal: { width: 14, height: 8.5 },
+  tabloid: { width: 17, height: 11 },
+  "9x12": { width: 9, height: 12 },
+  "18x12": { width: 18, height: 12 },
+  "24x18": { width: 24, height: 18 },
+  "36x24": { width: 36, height: 24 },
+  a4: { width: 297, height: 210 },
+  a3: { width: 420, height: 297 },
+  a2: { width: 594, height: 420 },
+  a1: { width: 841, height: 594 },
+};
+
+/**
+ * Cached DOM handles used throughout the app.
+ */
+export const dom = {
+  dropZone: document.querySelector("#dropZone"),
+  fileInput: document.querySelector("#fileInput"),
+  loadDemoButton: document.querySelector("#loadDemoButton"),
+  exportButton: document.querySelector("#exportButton"),
+  paperPreset: document.querySelector("#paperPreset"),
+  customPaperFields: document.querySelector("#customPaperFields"),
+  paperWidth: document.querySelector("#paperWidth"),
+  paperHeight: document.querySelector("#paperHeight"),
+  frameCols: document.querySelector("#frameCols"),
+  frameRows: document.querySelector("#frameRows"),
+  thresholdMethod: document.querySelector("#thresholdMethod"),
+  thresholdOffset: document.querySelector("#thresholdOffset"),
+  thresholdOffsetValue: document.querySelector("#thresholdOffsetValue"),
+  crossRoiScale: document.querySelector("#crossRoiScale"),
+  crossRoiScaleValue: document.querySelector("#crossRoiScaleValue"),
+  useCrossAlignment: document.querySelector("#useCrossAlignment"),
+  useRectifiedAsSource: document.querySelector("#useRectifiedAsSource"),
+  cropLeft: document.querySelector("#cropLeft"),
+  cropRight: document.querySelector("#cropRight"),
+  cropTop: document.querySelector("#cropTop"),
+  cropBottom: document.querySelector("#cropBottom"),
+  brightness: document.querySelector("#brightness"),
+  brightnessValue: document.querySelector("#brightnessValue"),
+  contrast: document.querySelector("#contrast"),
+  contrastValue: document.querySelector("#contrastValue"),
+  vibrance: document.querySelector("#vibrance"),
+  vibranceValue: document.querySelector("#vibranceValue"),
+  invert: document.querySelector("#invert"),
+  fps: document.querySelector("#fps"),
+  gifQuality: document.querySelector("#gifQuality"),
+  gifQualityValue: document.querySelector("#gifQualityValue"),
+  gifDither: document.querySelector("#gifDither"),
+  gifResampling: document.querySelector("#gifResampling"),
+  gifGlobalPalette: document.querySelector("#gifGlobalPalette"),
+  statusText: document.querySelector("#statusText"),
+  rawCanvas: document.querySelector("#rawCanvas"),
+  rawPhotoName: document.querySelector("#rawPhotoName"),
+  rectifiedCanvas: document.querySelector("#rectifiedCanvas"),
+  gifPreviewCanvas: document.querySelector("#gifPreviewCanvas"),
+  gifImage: document.querySelector("#gifImage"),
+  crossRoiGrid: document.querySelector("#crossRoiGrid"),
+  resetAppearanceButton: document.querySelector("#resetAppearanceButton"),
+  resetTrimButton: document.querySelector("#resetTrimButton"),
+};
+
+/**
+ * Shared application state, grouped by concern so cache invalidation stays explicit.
+ */
+export const state = {
+  runtime: {
+    cvReady: false,
+  },
+  source: {
+    image: null,
+    filename: "",
+    canvas: document.createElement("canvas"),
+    rawPageContour: null,
+  },
+  geometry: {
+    alignmentInfo: null,
+    baseRectifiedCanvas: null,
+    frameCount: 0,
+  },
+  frames: {
+    base: [],
+    adjustedCache: new Map(),
+  },
+  preview: {
+    adjustedRectifiedCanvas: document.createElement("canvas"),
+    rectifiedCanvas: null,
+    frameIndex: 0,
+    lastTime: 0,
+    loopHandle: 0,
+    resizeTimer: 0,
+    appearancePreviewRaf: 0,
+    appearancePreviewNeedsRectified: false,
+  },
+  processing: {
+    timer: 0,
+    active: false,
+    requestId: 0,
+    pending: false,
+  },
+  export: {
+    filename: "",
+    url: "",
+  },
+};
