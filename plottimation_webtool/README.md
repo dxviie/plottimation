@@ -11,7 +11,7 @@ Version 1.0 • March 2026 • By Golan Levin
 2. Drag in a photo or scan of your plotted sheet, or click `Load Demo`.
 3. Set `Frame Columns` and `Frame Rows` to match your layout.
 4. Choose the correct paper size.
-5. If needed, adjust detection, appearance, crop, or export settings.
+5. If needed, adjust page detection, appearance, crop, or export settings.
 6. Review the `Animation Preview`.
 7. Click `Export GIF` to generate and download the final GIF.
 
@@ -21,7 +21,8 @@ Version 1.0 • March 2026 • By Golan Levin
 
 Your sheet should:
 
-- be photographed or scanned in landscape orientation
+- be a plot on light-colored paper. 
+- be photographed or scanned in landscape orientation. 
 - show the entire page
 - be surrounded by a darker background 
 - contain a complete grid of small, dark, regularly-spaced `+` crosses separating the frames of your animation
@@ -30,6 +31,12 @@ Those small crosses are important. They define the frame grid and are used for a
 
 <img src="demo/mySrcImage.jpg" width="475" height="378">
 
+## Notes
+
+* Dark paper is not yet supported. 
+* Portrait orientation is not yet supported, but it might work. 
+
 ## An Example Output
 
 ![plottimation_ui.png](doc/mySrcImage_anim_20260315_103518_q10.gif)
+

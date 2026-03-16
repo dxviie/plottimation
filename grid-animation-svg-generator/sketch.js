@@ -20,6 +20,7 @@ let ANIMATION_STYLE = 1;
 // For SVG export
 p5.disableFriendlyErrors = true; 
 let bDoExportSvg = false; 
+let exportSvgButton;
 
 //-------------------------------------------------
 function setup() {
@@ -27,6 +28,12 @@ function setup() {
   frameRate(30); 
   strokeWeight(1.0); 
   noFill(); 
+  
+  exportSvgButton = createButton('Export SVG');
+  exportSvgButton.position(10,10);
+  exportSvgButton.mousePressed(function () {
+    bDoExportSvg = true;
+  });
 }
 
 
@@ -69,7 +76,6 @@ function draw() {
   
   stroke('black');
   drawDebugAndRegistrationFeatures(); 
-  stroke('red');
   drawAnimationFrames();
 
   if (bDoExportSvg){
