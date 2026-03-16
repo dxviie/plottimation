@@ -1,23 +1,27 @@
+// Press keys 1-3 for different animation designs. 
+// Press 's' to save SVG. 
+
+// Some good grid sizes are:
 // 5x4, 4x4, 4x3, 6x4, 6x5, 5x5, 3x3, 5x3
 const nCols = 5; 
 const nRows = 4;
 const aspectFrame = 4/3;
 
 const inch = 96;
-const marginPageX = inch * 0.75; // inches
+const crossSize = inch / 4;
+const marginPageX = inch * 0.75;
 const marginCell = inch * 0.25;
-const circR = inch / 8;
-const nCirc = Math.round(circR/inch * 80); 
 const nFrames = nCols * nRows;
 let bShowDebug = false;
 let bAnimating = true;
 let myFrameCount = 0; 
+let ANIMATION_STYLE = 1;
 
-
+// For SVG export
 p5.disableFriendlyErrors = true; 
 let bDoExportSvg = false; 
 
-//----------------------------------------------------------------
+//-------------------------------------------------
 function setup() {
   createCanvas(11*inch, 8.5*inch);
   frameRate(30); 
@@ -26,7 +30,7 @@ function setup() {
 }
 
 
-//----------------------------------------------------------------
+//-------------------------------------------------
 function keyPressed(){
   if (key == 's'){ 
     bDoExportSvg = true; 
@@ -38,17 +42,23 @@ function keyPressed(){
     myFrameCount--;
   } else if (!bAnimating && keyCode === RIGHT_ARROW) {
     myFrameCount++;
+  } else if (key == 1){
+    ANIMATION_STYLE = 1; 
+  } else if (key == 2){
+    ANIMATION_STYLE = 2; 
+  } else if (key == 3){
+    ANIMATION_STYLE = 3; 
   }
 }
 
 
-//----------------------------------------------------------------
+//-------------------------------------------------
 function draw() {
   background('white');
   if (bDoExportSvg){
     let timeStr = nf(hour(),2)+nf(minute(),2); 
     let fn = "animation_" + nCols + "x" + nRows + "_" + timeStr + ".svg";
-    beginRecordSVG(this, fn);
+    beginRecordSvg(this, fn);
     setSvgGroupByStrokeColor(true); 
     setSvgFlattenTransforms(true); 
   }
@@ -59,32 +69,47 @@ function draw() {
   
   stroke('black');
   drawDebugAndRegistrationFeatures(); 
-  
   stroke('red');
   drawAnimationFrames();
-  
 
   if (bDoExportSvg){
-    endRecordSVG();
+    endRecordSvg();
     bDoExportSvg = false;
   }
 }
 
 
-//----------------------------------------------------------------
+
+//-------------------------------------------------
 function drawAnimationFrames(){
   for (let row=0; row<nRows; row++){
     for (let col=0; col<nCols; col++){
       let C = getCellAndFrameCoords(row,col); 
       let findex = row*nCols + col;
-      drawAnimationFrame(C.framex,C.framey,C.framew,C.frameh, findex);
+      const fx = C.framex;
+      const fy = C.framey;
+      const fw = C.framew;
+      const fh = C.frameh;
+      
+      switch (ANIMATION_STYLE){
+        case 1: 
+          drawAnimationFrameStyle1(fx,fy,fw,fh, findex);
+          break;
+        case 2: 
+          drawAnimationFrameStyle2(fx,fy,fw,fh, findex);
+          break;
+        case 3:
+          drawAnimationFrameStyle3(fx,fy,fw,fh, findex);
+          break;
+      }
     }
   }
 }
 
 
-//----------------------------------------------------------------
-function drawAnimationFrame (fx,fy, fw,fh, findex){
+//-------------------------------------------------
+function drawAnimationFrameStyle1 (fx,fy, fw,fh, findex){
+  // ANIMATION_STYLE 1
   // After a design by Dave Mawer (dmawer_art)
   // https://x.com/FigsFromPlums/status/1974203677771477418
   const phase = TWO_PI * ((myFrameCount+findex)%nFrames)/nFrames; 
@@ -103,10 +128,10 @@ function drawAnimationFrame (fx,fy, fw,fh, findex){
 }
 
 
-//----------------------------------------------------------------
-function drawAnimationFrameFancy (fx,fy, fw,fh, findex){
-  const t = ((myFrameCount+findex)%nFrames)/nFrames; // findex / nFrames; 
-  
+//-------------------------------------------------
+function drawAnimationFrameStyle2 (fx,fy, fw,fh, findex){
+  // ANIMATION_STYLE 2
+  const t = ((myFrameCount+findex)%nFrames)/nFrames;
   push(); 
   translate(fx,fy); 
   
@@ -130,35 +155,69 @@ function drawAnimationFrameFancy (fx,fy, fw,fh, findex){
       let py = cy + cr * sin(u);  
       if ((j > 0) && ((j+i)%2 == 0)) {
         lineClipped(px,py,qx,qy, 0,0,fw,fh); 
-        //line(px,py,qx,qy); 
+        // line(px,py,qx,qy); 
       }
       qx = px; 
       qy = py;
     }
   }
-  
+  pop(); 
+}
+
+//-------------------------------------------------
+function drawAnimationFrameStyle3 (fx,fy, fw,fh, findex){
+  // ANIMATION_STYLE 2
+  const t = ((myFrameCount+findex)%nFrames)/nFrames;
+
+  function drawClippedRotRect(px,py, rw,rh, rotAng) {
+    let hw = rw * 0.5;
+    let hh = rh * 0.5;
+    let c = cos(rotAng);
+    let s = sin(rotAng);
+    let x0 = -hw, y0 = -hh;
+    let x1 =  hw, y1 = -hh;
+    let x2 =  hw, y2 =  hh;
+    let x3 = -hw, y3 =  hh;
+    let ax = px + x0 * c - y0 * s;
+    let ay = py + x0 * s + y0 * c;
+    let bx = px + x1 * c - y1 * s;
+    let by = py + x1 * s + y1 * c;
+    let cx = px + x2 * c - y2 * s;
+    let cy = py + x2 * s + y2 * c;
+    let dx = px + x3 * c - y3 * s;
+    let dy = py + x3 * s + y3 * c;
+    lineClipped(ax,ay, bx,by, 0,0,fw,fh);
+    lineClipped(bx,by, cx,cy, 0,0,fw,fh);
+    lineClipped(cx,cy, dx,dy, 0,0,fw,fh);
+    lineClipped(dx,dy, ax,ay, 0,0,fw,fh);
+  }
+
+  push(); 
+  translate(fx,fy); 
+  rect(0,0, fw,fh); 
+    let px = fw * 0.7; 
+    let py = fh * 0.4; 
+    let pw = fw * 0.7;
+    let ph = fh * 0.6;
+    let rot = t*PI; 
+    drawClippedRotRect(px,py, pw,ph, rot);
   pop(); 
 }
 
 
-//----------------------------------------------------------------
+
+
+//-------------------------------------------------
 function drawDebugAndRegistrationFeatures(){
   for (let row=0; row<=nRows; row++){
     for (let col=0; col<=nCols; col++){
       let C = getCellAndFrameCoords(row,col); 
       
-      if (((row==0) || (row==nRows)) && ((col==0) || (col==nCols))) {
-        // draw registration circles on corners
-        for (let h=0; h<=nCirc; h++){
-          let hr = map(h,0,nCirc, 1,circR);
-          circle(C.cellx, C.celly, hr*2);
-        }
-      } else {
-        // draw registration crosses
-        let d = circR*0.8; 
-        line(C.cellx,C.celly-d, C.cellx,C.celly+d);
-        line(C.cellx-d,C.celly, C.cellx+d,C.celly);
-      }
+      // draw registration crosses
+      let d = crossSize/2;
+      line(C.cellx,C.celly-d, C.cellx,C.celly+d);
+      line(C.cellx-d,C.celly, C.cellx+d,C.celly);
+      
       if (row<nRows && col<nCols){
         // draw animation frame borders
         if (bShowDebug){
@@ -170,7 +229,7 @@ function drawDebugAndRegistrationFeatures(){
 }
 
 
-//----------------------------------------------------------------
+//-------------------------------------------------
 function getCellAndFrameCoords(row, col){
   let cx = map(col,0,nCols, marginPageX,width-marginPageX);
   let cw = (width - 2*marginPageX)/nCols;
@@ -195,7 +254,7 @@ function getCellAndFrameCoords(row, col){
 }
 
 
-//----------------------------------------------------------------
+//-------------------------------------------------
 function lineClipped(ax, ay, bx, by, rx, ry, rw, rh){
   let L = getLineClippedToRect(ax, ay, bx, by, rx, ry, rw, rh);
   if (L){
@@ -204,7 +263,7 @@ function lineClipped(ax, ay, bx, by, rx, ry, rw, rh){
 }
 
 
-//----------------------------------------------------------------
+//-------------------------------------------------
 // Liang–Barsky clipping:
 // Crop a line segment (ax,ay)-(bx,by) to 
 // an axis-aligned rect at (rx,ry) size (rw,rh).
