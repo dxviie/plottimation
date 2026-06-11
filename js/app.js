@@ -72,6 +72,9 @@ import { applyTranslations, getTooltipText, t } from "./i18n.js";
 // Final output-size scaling can be done either with browser canvas drawImage() or with OpenCV.
 // Keep both code paths available for comparison while evaluating tiny-output quality.
 const bUseOpenCvOutputScaling = true;
+// SPIKE: per-frame, remove — flip to true to activate the 2-frame composite spike.
+const SPIKE_PER_FRAME = true;
+const SPIKE_SHIFT_PX = 4;
 const MOBILE_VIEWER_BREAKPOINT_PX = 960;
 const LIVE_THRESHOLD_PREVIEW_MAX_LONG_EDGE_PX = 512;
 const RECTIFIED_FULL_RES_EAGER_LONG_EDGE_PX = 3000;
@@ -4167,6 +4170,148 @@ async function processCurrentImage(requestId = state.processing.requestId) {
       finishTimingProfile(timingProfile);
       return;
     }
+
+    // SPIKE: per-frame, remove — build a 2-frame composite from the single-image pipeline result.
+    if (SPIKE_PER_FRAME && result.rectifiedMat && !result.rectifiedMat.isDeleted()) {
+      timeProfiled("spikePerFrame", () => {
+        const srcMat = result.rectifiedMat;
+        const cellW = srcMat.cols;
+        const cellH = srcMat.rows;
+        const compositeW = cellW * 2;
+
+        // Build a 2-cell horizontal composite: [original | shifted copy].
+        const composite = new cv.Mat(cellH, compositeW, srcMat.type(), new cv.Scalar(0, 0, 0, 0));
+        const roi0 = composite.roi(new cv.Rect(0, 0, cellW, cellH));
+        srcMat.copyTo(roi0);
+        roi0.delete();
+
+        // Shift the second copy by a few pixels so stabilization produces non-zero offsets.
+        const roi1 = composite.roi(new cv.Rect(cellW, 0, cellW, cellH));
+        const shifted = new cv.Mat();
+        const translationMatrix = cv.matFromArray(2, 3, cv.CV_64FC1, [1, 0, SPIKE_SHIFT_PX, 0, 1, SPIKE_SHIFT_PX]);
+        try {
+          cv.warpAffine(srcMat, shifted, translationMatrix, new cv.Size(cellW, cellH), cv.INTER_LINEAR, cv.BORDER_REPLICATE, new cv.Scalar());
+          shifted.copyTo(roi1);
+        } finally {
+          shifted.delete();
+          translationMatrix.delete();
+        }
+        roi1.delete();
+
+        // Build synthetic alignmentInfo for a 1-row × 2-column grid.
+        const gridBounds = { left: 0, top: 0, width: compositeW, height: cellH };
+        const cols = 2;
+        const rows = 1;
+        const markerLookup = new Map();
+        for (let r = 0; r <= rows; r++) {
+          for (let c = 0; c <= cols; c++) {
+            const x = gridBounds.left + gridBounds.width * (c / cols);
+            const y = gridBounds.top + gridBounds.height * (r / rows);
+            const key = getMarkerKey(c, r);
+            markerLookup.set(key, {
+              col: c, row: r, x, y,
+              kind: "synthetic",
+              detectedX: x, detectedY: y,
+              dx: 0, dy: 0,
+              confidence: 10,
+              accepted: true,
+            });
+          }
+        }
+        const syntheticAlignmentInfo = {
+          ok: true,
+          reason: "spike-per-frame",
+          includeCornerCrosses: true,
+          requestedMarkerType: "crosses",
+          resolvedMarkerType: "crosses",
+          markerTypeMedianCircularity: null,
+          rectifiedWidth: compositeW,
+          rectifiedHeight: cellH,
+          gridBounds,
+          cols,
+          rows,
+          expectedCount: markerLookup.size,
+          detectedCount: markerLookup.size,
+          expectedCrosses: [...markerLookup.values()],
+          anchorDots: [],
+          detectedCrosses: [...markerLookup.values()],
+          rejectedCrosses: [],
+          markerLookup,
+          frameDebugQuads: [],
+          crossRoiTiles: [],
+          crossRoiTileMap: new Map(),
+        };
+
+        // Extract 2 frames from the composite.
+        const crop = config.crop;
+        const interpolation = getCvInterpolationFlag(config.exportOptions.resampling);
+        const spikeFrames = [];
+        for (let c = 0; c < cols; c++) {
+          spikeFrames.push(extractSingleFrameToCanvas(composite, syntheticAlignmentInfo, c, 0, crop, interpolation));
+        }
+
+        // Build a preview canvas from the composite (reuse the pipeline's approach).
+        const maxPreviewEdge = 2200;
+        const longEdge = Math.max(composite.cols, composite.rows);
+        let spikePreviewCanvas;
+        if (longEdge <= maxPreviewEdge) {
+          spikePreviewCanvas = document.createElement("canvas");
+          const rgba = new cv.Mat();
+          try {
+            if (composite.type() === cv.CV_8UC3) {
+              cv.cvtColor(composite, rgba, cv.COLOR_BGR2RGBA);
+            } else {
+              composite.copyTo(rgba);
+            }
+            spikePreviewCanvas.width = rgba.cols;
+            spikePreviewCanvas.height = rgba.rows;
+            const imgData = new ImageData(new Uint8ClampedArray(rgba.data), rgba.cols, rgba.rows);
+            spikePreviewCanvas.getContext("2d").putImageData(imgData, 0, 0);
+          } finally {
+            rgba.delete();
+          }
+        } else {
+          const scale = maxPreviewEdge / longEdge;
+          const pw = Math.max(1, Math.round(composite.cols * scale));
+          const ph = Math.max(1, Math.round(composite.rows * scale));
+          const resized = new cv.Mat();
+          const rgba = new cv.Mat();
+          try {
+            cv.resize(composite, resized, new cv.Size(pw, ph), 0, 0, cv.INTER_AREA);
+            if (resized.type() === cv.CV_8UC3) {
+              cv.cvtColor(resized, rgba, cv.COLOR_BGR2RGBA);
+            } else {
+              resized.copyTo(rgba);
+            }
+            spikePreviewCanvas = document.createElement("canvas");
+            spikePreviewCanvas.width = rgba.cols;
+            spikePreviewCanvas.height = rgba.rows;
+            const imgData = new ImageData(new Uint8ClampedArray(rgba.data), rgba.cols, rgba.rows);
+            spikePreviewCanvas.getContext("2d").putImageData(imgData, 0, 0);
+          } finally {
+            resized.delete();
+            rgba.delete();
+          }
+        }
+
+        // Release the original single-image rectified Mat and swap in the composite.
+        srcMat.delete();
+        result.rectifiedMat = composite;
+        result.rectifiedCanvas = spikePreviewCanvas;
+        result.frames = spikeFrames;
+        result.alignmentInfo = syntheticAlignmentInfo;
+        result.pagePreviewCanvas = null;
+        result.pagePreviewWidth = 0;
+        result.pagePreviewHeight = 0;
+        result.pagePreviewGridQuad = null;
+        result.pagePreviewGridBounds = null;
+        result.pageQuadSource = "spike-per-frame";
+        result.rectifiedDownloadUsesRawSource = false;
+        result.statusText = `SPIKE: 2-frame composite (${compositeW}×${cellH}), shift=${SPIKE_SHIFT_PX}px`;
+        console.log("[SPIKE per-frame]", result.statusText);
+      });
+    }
+    // SPIKE: per-frame, remove — end of spike block.
 
     timeProfiled("applyPipelineResult", () => {
       // `runPipeline()` returns raw extracted frame canvases at rectified-sheet/crop resolution.
