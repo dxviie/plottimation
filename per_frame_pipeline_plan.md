@@ -344,6 +344,46 @@ testing.
 - UI strip (Phase 7).
 - Settings persistence (Phase 8).
 
+**As built (Phase 3 — COMPLETE):**
+- `js/pipeline.js`:
+  - Added `runPerFramePipeline(images, config, requestId, throwIfAborted)`. It filters the entries
+    to those with a `canvas`, throws if none, then per image calls `rectifySinglePage` with a shallow
+    `config` copy overriding `alignmentPipeline: "markerless"`, `manualPageQuadPoints:
+    entry.manualPageContour ?? null`, `fallbackPageQuadPoints: null`, `postRotationDeg:
+    entry.postRotationDeg ?? 0`. The grayscale `visionMat` is deleted immediately; only the styled
+    (BGR) page is kept as the cell source.
+  - Common cell size is `Math.round(clamp(median(dim), PER_FRAME_MIN_CELL_PX,
+    PER_FRAME_MAX_CELL_PX))` per dimension (new constants `16` / `1600`). The strict composite-area
+    ceiling and uniform scale-down remain deferred to Phase 9; this is the per-dimension guard.
+  - Each styled page is resized (or `copyTo` when already cell-sized) into its column of a
+    `cv.CV_8UC3` composite via `composite.roi(...)`, then freed right after it is consumed. The
+    `finally` block releases any still-unconsumed per-image Mats and the composite itself if the
+    function throws before handing it off.
+  - `alignmentInfo` is synthesized with `buildUnrefinedCrossRegionInfo(composite, N, 1, "per-frame",
+    fullBounds, config.crossRoiScale, { markerType: "crosses", includeCornerCrosses: true })` — i.e.
+    a 1×N markerless-style lattice with regular corner intersections at the column boundaries.
+  - Frames come from the existing `sliceRectifiedToCanvases`; the preview canvas from
+    `matToPreviewCanvas`. `statusText` is built from existing `status.framesExtracted` /
+    `status.rectifiedSheet` / `status.animationSize` keys (no new i18n strings). The return shape
+    matches `runPipeline` with `pagePreview*` null, `pageQuadSource: "per-frame"`,
+    `rectifiedDownloadUsesRawSource: false`.
+  - `runPipeline` gained an optional 5th param `images = null` and dispatches to
+    `runPerFramePipeline` when `config.alignmentPipeline === "per-frame"` before the single-page
+    path. It still does not import `state`; `images` is passed in by the caller.
+- `js/app.js`:
+  - `readConfig` computes `perFrameModeActive = !!dom.alignmentPipelinePerFrame?.checked ||
+    !!state.runtime.forcePerFrameMode`. The radio ref is read with optional chaining so this is
+    forward-compatible with the real radio added in Phase 6. `alignmentPipeline` emits `"per-frame"`
+    when active, and `useCrossAlignment` is forced `false` in that mode.
+  - The `runPipeline` invocation site now passes `state.source.images` as the 5th argument.
+- `js/dom-state.js`: added `state.runtime.forcePerFrameMode = false` — a Phase 3 dev flag so the
+  pipeline can be driven from the console before the Phase 6 radio exists. Set it `true` (with images
+  loaded) and reprocess to exercise per-frame mode.
+- No other `app.js` sites were touched (e.g. the markerless stabilization-warmup gating at the
+  `processCurrentImage` tail). Mode-gated downstream behavior — including auto-scheduling
+  stabilization for per-frame — is deferred to Phase 6's `=== "markerless"` audit, per this phase's
+  "readConfig + the runPipeline invocation site only" scope.
+
 ---
 
 ### Phase 4 — Multi-file upload (`handleFile`, drop zone)

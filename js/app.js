@@ -2941,6 +2941,10 @@ function readConfig() {
   const frameCols = Math.max(1, Math.min(20, Math.round(Number(dom.frameCols.value) || SETTINGS_DEFAULTS.layout.frameCols)));
   const frameRows = Math.max(1, Math.min(20, Math.round(Number(dom.frameRows.value) || SETTINGS_DEFAULTS.layout.frameRows)));
   const sourceFrameCount = Math.max(1, frameCols * frameRows);
+  // Per-frame mode is selected by its own radio (added in Phase 6) or, until then, by a dev flag so
+  // the pipeline can be exercised before the UI exists. The radio ref is read with optional chaining
+  // so this stays correct both before and after Phase 6 wires `dom.alignmentPipelinePerFrame`.
+  const perFrameModeActive = !!dom.alignmentPipelinePerFrame?.checked || !!state.runtime.forcePerFrameMode;
   const encodingQuality = getEncodingQualityValue();
   const readSearchInset = (input, fallback) => Math.max(
     0,
@@ -2978,7 +2982,11 @@ function readConfig() {
           : SETTINGS_DEFAULTS.detection.postRotationDeg
       )
     ),
-    alignmentPipeline: dom.alignmentPipelineMarkerless.checked ? "markerless" : "markers",
+    alignmentPipeline: perFrameModeActive
+      ? "per-frame"
+      : dom.alignmentPipelineMarkerless.checked
+      ? "markerless"
+      : "markers",
     // The radio group exposes a temporary-friendly UI label, but the config keeps stable internal
     // ids so settings files and solver branching do not depend on user-facing wording.
     stabilizationMethod: dom.stabilizationMethodAverage?.checked ? "difference-from-average" : "pairwise-cyclic",
@@ -3011,7 +3019,11 @@ function readConfig() {
     markerlessUseVariance: dom.markerlessUseVariance ? dom.markerlessUseVariance.checked : true,
     lightOnDarkDesign: dom.lightOnDarkDesign ? dom.lightOnDarkDesign.checked : false,
     detectCrossesWithConvolution: (dom.alignmentPipelineMarkers.checked && dom.alignmentMarkerType.value === "crosses") && dom.detectCrossesWithConvolution.checked,
-    useCrossAlignment: dom.alignmentPipelineMarkerless.checked ? true : dom.useCrossAlignment.checked,
+    useCrossAlignment: perFrameModeActive
+      ? false
+      : dom.alignmentPipelineMarkerless.checked
+      ? true
+      : dom.useCrossAlignment.checked,
     useRectifiedAsSource: false,
     crop: {
       left: Math.max(0, Math.round(Number(dom.cropLeft.value) || 0)),
@@ -4162,7 +4174,7 @@ async function processCurrentImage(requestId = state.processing.requestId) {
 
   try {
     const config = timeProfiled("readConfig", () => readConfig());
-    const result = timeProfiled("runPipeline", () => runPipeline(state.source.canvas, config, requestId, throwIfProcessAborted));
+    const result = timeProfiled("runPipeline", () => runPipeline(state.source.canvas, config, requestId, throwIfProcessAborted, state.source.images));
     if (requestId !== state.processing.requestId) {
       finishTimingProfile(timingProfile);
       return;

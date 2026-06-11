@@ -26,6 +26,12 @@ const MARKERLESS_PHASE_BAND_WIDTH = 3;
 const MARKERLESS_DEFAULT_CORNER_TILE_SCALE = 0.52;
 const MARKERLESS_DEFAULT_CORNER_TILE_MAX_SIDE_PX = 127;
 const RECTIFIED_PREVIEW_LONG_EDGE_PX = 2200;
+// Per-frame mode resizes every rectified page to one common cell size before stacking them into a
+// synthetic 1×N composite sheet. The chosen median cell dimensions are clamped to this range so a
+// single oversized page cannot blow up the composite Mat. Phase 9 tightens this into a strict
+// composite-area ceiling; this is the per-dimension guard.
+const PER_FRAME_MIN_CELL_PX = 16;
+const PER_FRAME_MAX_CELL_PX = 1600;
 const NEAR_IDENTITY_PAGE_AREA_PCT = 0.998;
 const NEAR_IDENTITY_CORNER_TOLERANCE_PX = 2;
 const NEAR_IDENTITY_DIM_TOLERANCE_PX = 2;
@@ -246,7 +252,14 @@ function clampPositiveConvolutionToUint8(conv32, target8) {
  *   rectifiedDownloadUsesRawSource: boolean
  * }}
  */
-export function runPipeline(sourceCanvas, config, requestId, throwIfAborted) {
+export function runPipeline(sourceCanvas, config, requestId, throwIfAborted, images = null) {
+  // Per-frame mode does not rectify a single frame-sheet; it rectifies one page per uploaded image
+  // and stacks them into a synthetic 1×N composite. Dispatch before touching the single-page path.
+  // `images` is passed in by the caller so this module never reaches into `state` directly.
+  if (config.alignmentPipeline === "per-frame") {
+    return runPerFramePipeline(images || [], config, requestId, throwIfAborted);
+  }
+
   const useMarkerlessAlignment = config.alignmentPipeline === "markerless";
   let rectifiedWarp = null;
   let pageRectification = null;
@@ -392,6 +405,183 @@ export function runPipeline(sourceCanvas, config, requestId, throwIfAborted) {
     // still owned here. Its styledMat is set to null after being handed off as `rectifiedMat`.
     rectifiedWarp?.visionMat?.delete();
     rectifiedWarp?.styledMat?.delete();
+  }
+}
+
+/**
+ * Per-frame alignment pipeline.
+ *
+ * Instead of one frame-sheet photo, the user uploads one image per animation frame. Each image is
+ * page-rectified independently (reusing {@link rectifySinglePage}), every rectified page is resized
+ * to a single common cell size, and the cells are stacked horizontally into a synthetic `1 × N`
+ * composite sheet. From that point on the rest of the app treats the composite exactly like a
+ * markerless frame-sheet, so stabilization / ordering / appearance / export need no per-frame
+ * branching.
+ *
+ * Ownership: the caller takes ownership of the returned `rectifiedMat` (the composite) and must
+ * delete it. Every other Mat allocated here — per-image rectified pages and per-cell resize buffers —
+ * is released internally, including on abort or failure.
+ *
+ * Each `rectifySinglePage` call is handed a shallow copy of `config` with the per-image fields
+ * overridden. `alignmentPipeline` is aliased to `"markerless"` for that copy because
+ * `rectifySinglePage` branches its near-identity fast path and grid rectification on that value; the
+ * base `config.alignmentPipeline` stays `"per-frame"` for the dispatcher and downstream UI gating.
+ *
+ * @param {Array<{canvas:HTMLCanvasElement, manualPageContour?:object|null, postRotationDeg?:number}>} images
+ * @param {object} config
+ * @param {number} requestId
+ * @param {(requestId:number) => void} throwIfAborted
+ * @returns {{
+ *   frames: HTMLCanvasElement[],
+ *   rectifiedCanvas: HTMLCanvasElement,
+ *   rectifiedMat: cv.Mat,
+ *   pagePreviewCanvas: null,
+ *   pagePreviewWidth: number,
+ *   pagePreviewHeight: number,
+ *   pagePreviewGridQuad: null,
+ *   pagePreviewGridBounds: null,
+ *   alignmentInfo: object,
+ *   statusText: string,
+ *   pageQuadPoints: null,
+ *   pageQuadSource: "per-frame",
+ *   rectifiedDownloadUsesRawSource: false
+ * }}
+ */
+function runPerFramePipeline(images, config, requestId, throwIfAborted) {
+  const entries = Array.isArray(images) ? images.filter((entry) => entry && entry.canvas) : [];
+  if (entries.length === 0) {
+    throw new Error("Per-frame mode requires at least one uploaded image.");
+  }
+  const interpolation = getCvInterpolationFlag(config.exportOptions.resampling);
+  /** @type {(cv.Mat | null)[]} Per-image styled (BGR) rectified pages, freed as they are composited. */
+  const cellStyledMats = [];
+  let composite = null;
+
+  try {
+    // 1-3. Rectify each uploaded page independently. Per-frame mode does not run per-image alignment,
+    // so the grayscale vision Mat is released immediately and only the styled (BGR) page is kept as
+    // the cell source.
+    for (const entry of entries) {
+      throwIfAborted(requestId);
+      const perImageConfig = {
+        ...config,
+        // rectifySinglePage branches its fast path / grid rectification on this value, so per-frame
+        // mode aliases to "markerless" here rather than passing "per-frame".
+        alignmentPipeline: "markerless",
+        // Per-image page-corner override (source-space quad). Phase 5 will populate this from the UI.
+        manualPageQuadPoints: entry.manualPageContour ?? null,
+        // No live threshold-preview fallback when rectifying per image.
+        fallbackPageQuadPoints: null,
+        // Per-image Post-Rotation. Phase 5 stores this on the image entry.
+        postRotationDeg: entry.postRotationDeg ?? 0,
+      };
+      const rectification = rectifySinglePage(entry.canvas, perImageConfig, requestId, throwIfAborted);
+      const rectifiedWarp = rectification.rectifiedWarp;
+      rectifiedWarp.visionMat?.delete();
+      rectifiedWarp.visionMat = null;
+      cellStyledMats.push(rectifiedWarp.styledMat);
+    }
+    throwIfAborted(requestId);
+
+    // 4. Pick a single common cell size from the median rectified dimensions, clamped so one
+    // oversized page cannot blow up the composite Mat.
+    const frameCount = cellStyledMats.length;
+    const widths = cellStyledMats.map((mat) => mat.cols);
+    const heights = cellStyledMats.map((mat) => mat.rows);
+    const cellW = Math.round(
+      Math.max(PER_FRAME_MIN_CELL_PX, Math.min(PER_FRAME_MAX_CELL_PX, computeMedian(widths)))
+    );
+    const cellH = Math.round(
+      Math.max(PER_FRAME_MIN_CELL_PX, Math.min(PER_FRAME_MAX_CELL_PX, computeMedian(heights)))
+    );
+
+    // 5-6. Resize each rectified page to the common cell size and copy it into its composite column.
+    // Each per-image styled Mat is freed immediately after it is consumed.
+    composite = new cv.Mat(cellH, cellW * frameCount, cv.CV_8UC3, new cv.Scalar(0, 0, 0));
+    const cellSize = new cv.Size(cellW, cellH);
+    for (let i = 0; i < frameCount; i++) {
+      throwIfAborted(requestId);
+      const styledMat = cellStyledMats[i];
+      const resized = new cv.Mat();
+      try {
+        if (styledMat.cols === cellW && styledMat.rows === cellH) {
+          styledMat.copyTo(resized);
+        } else {
+          cv.resize(styledMat, resized, cellSize, 0, 0, interpolation);
+        }
+        const roi = composite.roi(new cv.Rect(i * cellW, 0, cellW, cellH));
+        try {
+          resized.copyTo(roi);
+        } finally {
+          roi.delete();
+        }
+      } finally {
+        resized.delete();
+        styledMat.delete();
+        cellStyledMats[i] = null;
+      }
+    }
+    throwIfAborted(requestId);
+
+    // 7. Synthesize the 1×N corner lattice the downstream subsystems expect. The cell boundaries are
+    // known exactly (no detection needed), so the unrefined-region builder used by markerless mode is
+    // reused directly with regular corner intersections at the column boundaries.
+    const gridBounds = { left: 0, top: 0, width: composite.cols, height: composite.rows };
+    const alignmentInfo = buildUnrefinedCrossRegionInfo(
+      composite,
+      frameCount,
+      1,
+      "per-frame",
+      gridBounds,
+      config.crossRoiScale,
+      { markerType: "crosses", includeCornerCrosses: true }
+    );
+    throwIfAborted(requestId);
+
+    // 9. Extract each frame canvas from the composite using the same slicer as the other pipelines.
+    const frames = sliceRectifiedToCanvases(
+      composite,
+      alignmentInfo,
+      config.crop,
+      interpolation,
+      requestId,
+      throwIfAborted
+    );
+
+    // 8. Bounded preview canvas of the composite sheet for the Rectified Grid panel.
+    const rectifiedCanvas = matToPreviewCanvas(composite, RECTIFIED_PREVIEW_LONG_EDGE_PX);
+
+    const statusText = [
+      t("status.framesExtracted", { count: frames.length, expected: frameCount }),
+      t("status.rectifiedSheet", { width: composite.cols, height: composite.rows }),
+      t("status.animationSize", { width: frames[0]?.width || 0, height: frames[0]?.height || 0 }),
+    ].join("\n");
+
+    // 10. Hand the composite to the caller; clear our reference so the finally block does not free it.
+    const rectifiedMat = composite;
+    composite = null;
+    return {
+      frames,
+      rectifiedCanvas,
+      rectifiedMat,
+      pagePreviewCanvas: null,
+      pagePreviewWidth: 0,
+      pagePreviewHeight: 0,
+      pagePreviewGridQuad: null,
+      pagePreviewGridBounds: null,
+      alignmentInfo,
+      statusText,
+      pageQuadPoints: null,
+      pageQuadSource: "per-frame",
+      rectifiedDownloadUsesRawSource: false,
+    };
+  } finally {
+    // Release any per-image styled Mats not yet consumed (abort/failure before they were composited).
+    for (const mat of cellStyledMats) {
+      mat?.delete?.();
+    }
+    // If we threw after allocating the composite but before handing it off, release it here.
+    composite?.delete?.();
   }
 }
 

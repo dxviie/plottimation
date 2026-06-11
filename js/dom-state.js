@@ -276,6 +276,9 @@ export const state = {
     mobileSingleViewerMode: false,
     activeViewerTab: "raw",
     activeMobileControlTab: "layout",
+    // Phase 3 dev flag: forces readConfig() to emit alignmentPipeline "per-frame" before the
+    // real radio (Phase 6) exists, so the per-frame pipeline can be exercised from the console.
+    forcePerFrameMode: false,
   },
   source: {
     image: null,
