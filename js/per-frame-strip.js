@@ -36,6 +36,8 @@ let dragSourceIndex = -1;
  * @property {() => void} reprocess Trigger a debounced reprocess (reorder/delete).
  * @property {(files: File[]) => Promise<void>} addImageFiles Decode + append images, then reprocess.
  * @property {() => boolean} isPerFrameModeActive Whether the per-frame pipeline is currently active.
+ * @property {() => void} clearPreviews Blank all downstream previews (used for the empty state when the
+ *   last image is deleted, since `reprocess` no-ops with no source image).
  */
 
 /**
@@ -330,7 +332,10 @@ function deleteImageAt(index) {
     state.source.image = null;
     lastRenderSignature = "";
     renderPerFrameStrip();
-    deps.reprocess();
+    // `reprocess` (scheduleProcess) no-ops with no source image, which would leave the prior
+    // rectified sheet / animation on screen. Blank the downstream previews instead so the empty
+    // state is visually consistent.
+    deps.clearPreviews();
     return;
   }
 

@@ -10,6 +10,7 @@
 **Contents**: 
 
 * [Alignment Pipeline](#alignment-pipeline)
+* [Per-Frame Pipeline](#per-frame-pipeline)
 * [Layout](#layout)
 * [Page & Grid Detection](#page--grid-detection)
 * [Automatic Frame Alignment](#automatic-frame-alignment)
@@ -28,7 +29,7 @@
 
 ## Alignment Pipeline
 
-*Use `Alignment Pipeline` to choose between the two different workflows for finding and aligning the animation frames.*
+*Use `Alignment Pipeline` to choose between three different workflows for finding and aligning the animation frames.*
 
 <img src="doc/ui_alignment_pipeline.png" width="330">
 
@@ -36,6 +37,34 @@
   This mode expects a page with registration markers between frames. The markers can be small crosses (`+`) or filled circular dots (`●`), rendered in a high-contrast ink. This pipeline produces the most stable results.
 * `Markerless (gutters, frames)` – 
   This mode estimates the frame grid without registration markers, strictly using the spacing and gutters between frames. Markerless alignment may be more "jittery" or inaccurate, depending on your design.
+* `Per-Frame (one image per frame)` –
+  This mode treats each uploaded image as a single animation frame, instead of slicing one frame-sheet photo into a grid. See [Per-Frame Pipeline](#per-frame-pipeline) below.
+
+
+---
+
+## Per-Frame Pipeline
+
+*Use the `Per-Frame` alignment pipeline when each animation frame is its own separate image, rather than one photographed sheet of many frames.*
+
+This is the right mode when you have a folder of individual drawings or photographs — one image per frame — and want them assembled into an animation. The number of uploaded images is the number of animation frames; the `Frame Rows` and `Frame Columns` layout controls become display-only in this mode.
+
+**Uploading multiple images:**
+
+* Drag several image files onto the drop zone at once. Dropping more than one image automatically switches the app into per-frame mode.
+* Use the file picker and select multiple files together (the file input accepts multi-select).
+* Add more images later with the `+` tile at the end of the image strip.
+
+**The image strip:** in per-frame mode a horizontal strip of thumbnails appears below the drop zone, one tile per uploaded image, numbered in frame order. From the strip you can:
+
+* click a thumbnail to make it the *active* image (this is navigation — it changes which image the Page editor shows, but does not rebuild the animation);
+* drag thumbnails to reorder frames (this changes the animation order and reprocesses);
+* delete a frame with the `×` button (the animation rebuilds with one fewer frame);
+* add more frames with the trailing `+` tile.
+
+**Per-image page-corner editing:** the Page Corners editor and the Post-Rotation control operate on the *active* image only. Edit the page corners (or post-rotation) for the active image, then switch to another image in the strip to edit it independently. Each image keeps its own page-corner override and post-rotation; switching the active image just navigates the editor to that image's saved settings and does not reprocess. The Page Detection Threshold remains a global control applied to all images when reprocessing.
+
+**Reloading a saved per-frame project:** settings files do not contain image data, so reloading a saved per-frame project means re-uploading the same images in the same order. See [Reloading a per-frame project](#reloading-a-per-frame-project) under Sibling Settings Files for details.
 
 
 ---

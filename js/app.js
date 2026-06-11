@@ -76,6 +76,7 @@ import {
   setActiveManualPageContour,
   setActivePostRotationDeg,
   createSourceImageEntry,
+  releaseEntryRectifiedCache,
 } from "./source-images.js";
 import { renderPerFrameStrip } from "./per-frame-strip.js";
 // Final output-size scaling can be done either with browser canvas drawImage() or with OpenCV.
@@ -2040,6 +2041,7 @@ function attachUi() {
     setActiveImage,
     isPerFrameModeActive,
     addPerFrameImages,
+    clearAllPreviews,
     bumpFrameOutputEpoch,
     setGeometryProcessingCursor,
     cancelInFlightProcessing,
@@ -5251,7 +5253,30 @@ function trimCachesBeforeReprocess() {
   state.frames.stabilizationOffsets = null;
   state.frames.adjustedCache.clear();
   state.frames.adjustedOutputEpoch.clear();
+  trimInactivePerFrameRectifiedCaches();
   syncRectifiedSheetHeadingLink();
+}
+
+/**
+ * Free per-image rectified Mat caches for every image that is NOT the active one, before a
+ * reprocess. In per-frame mode each uploaded image can hold its own cached rectified warp; only the
+ * active image's cache is kept warm between reprocesses. The composite `baseRectifiedMat` (the one
+ * large Mat that must stay live) is owned by `state.geometry`, not by the per-image entries, so it is
+ * never touched here.
+ *
+ * No-op for markers/markerless modes: those flows keep at most a single entry in
+ * `state.source.images[]`, so the loop either skips the lone active entry or runs zero times.
+ *
+ * @returns {void}
+ */
+function trimInactivePerFrameRectifiedCaches() {
+  const images = state.source.images;
+  if (!Array.isArray(images) || images.length <= 1) return;
+  const activeIndex = state.source.activeImageIndex;
+  for (let i = 0; i < images.length; i++) {
+    if (i === activeIndex) continue;
+    releaseEntryRectifiedCache(images[i]);
+  }
 }
 
 /**

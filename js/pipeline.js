@@ -28,10 +28,18 @@ const MARKERLESS_DEFAULT_CORNER_TILE_MAX_SIDE_PX = 127;
 const RECTIFIED_PREVIEW_LONG_EDGE_PX = 2200;
 // Per-frame mode resizes every rectified page to one common cell size before stacking them into a
 // synthetic 1×N composite sheet. The chosen median cell dimensions are clamped to this range so a
-// single oversized page cannot blow up the composite Mat. Phase 9 tightens this into a strict
-// composite-area ceiling; this is the per-dimension guard.
+// single oversized page cannot blow up the composite Mat. This is the per-dimension guard; the strict
+// composite-area ceiling (PER_FRAME_COMPOSITE_AREA_CEILING_PX) below bounds the whole stacked sheet.
 const PER_FRAME_MIN_CELL_PX = 16;
 const PER_FRAME_MAX_CELL_PX = 1600;
+// Strict composite-area ceiling for the stacked 1×N per-frame sheet. The existing single-page path
+// never materializes a rectified sheet larger than RECTIFIED_PREVIEW_LONG_EDGE_PX on its long edge
+// (matToPreviewCanvas caps the preview, and the high-res warp is diagonal-capped), so the largest
+// single working sheet is bounded by RECTIFIED_PREVIEW_LONG_EDGE_PX². The composite (cellW × N × cellH)
+// is held to that same total-area budget; if the median cell size would exceed it, cellW and cellH are
+// scaled down uniformly (aspect preserved) before allocation.
+const PER_FRAME_COMPOSITE_AREA_CEILING_PX =
+  RECTIFIED_PREVIEW_LONG_EDGE_PX * RECTIFIED_PREVIEW_LONG_EDGE_PX;
 const NEAR_IDENTITY_PAGE_AREA_PCT = 0.998;
 const NEAR_IDENTITY_CORNER_TOLERANCE_PX = 2;
 const NEAR_IDENTITY_DIM_TOLERANCE_PX = 2;
@@ -483,17 +491,26 @@ function runPerFramePipeline(images, config, requestId, throwIfAborted) {
     }
     throwIfAborted(requestId);
 
-    // 4. Pick a single common cell size from the median rectified dimensions, clamped so one
-    // oversized page cannot blow up the composite Mat.
+    // 4. Pick a single common cell size from the median rectified dimensions, clamped per-dimension so
+    // one oversized page cannot blow up the composite Mat.
     const frameCount = cellStyledMats.length;
     const widths = cellStyledMats.map((mat) => mat.cols);
     const heights = cellStyledMats.map((mat) => mat.rows);
-    const cellW = Math.round(
+    let cellW = Math.round(
       Math.max(PER_FRAME_MIN_CELL_PX, Math.min(PER_FRAME_MAX_CELL_PX, computeMedian(widths)))
     );
-    const cellH = Math.round(
+    let cellH = Math.round(
       Math.max(PER_FRAME_MIN_CELL_PX, Math.min(PER_FRAME_MAX_CELL_PX, computeMedian(heights)))
     );
+    // Strict composite-area ceiling: the whole stacked sheet (cellW × N × cellH) must fit the same
+    // memory budget the single-page path uses (RECTIFIED_PREVIEW_LONG_EDGE_PX²). If the median cells
+    // would exceed it, scale cellW and cellH down UNIFORMLY so the cell aspect ratio is preserved.
+    const compositeArea = cellW * cellH * frameCount;
+    if (compositeArea > PER_FRAME_COMPOSITE_AREA_CEILING_PX) {
+      const scale = Math.sqrt(PER_FRAME_COMPOSITE_AREA_CEILING_PX / compositeArea);
+      cellW = Math.max(PER_FRAME_MIN_CELL_PX, Math.round(cellW * scale));
+      cellH = Math.max(PER_FRAME_MIN_CELL_PX, Math.round(cellH * scale));
+    }
 
     // 5-6. Resize each rectified page to the common cell size and copy it into its composite column.
     // Each per-image styled Mat is freed immediately after it is consumed.

@@ -605,6 +605,7 @@ function attachMarkerlessPhaseMetricToggles({
  *   setActiveImage: (index:number) => void,
  *   isPerFrameModeActive: () => boolean,
  *   addPerFrameImages: (files: File[]) => Promise<void>,
+ *   clearAllPreviews: () => void,
  *   bumpFrameOutputEpoch: () => void,
  *   setGeometryProcessingCursor: (active:boolean) => void,
  *   cancelInFlightProcessing: () => void,
@@ -679,6 +680,7 @@ export function attachUi({
   setActiveImage,
   isPerFrameModeActive,
   addPerFrameImages,
+  clearAllPreviews,
   bumpFrameOutputEpoch,
   cancelInFlightProcessing,
   invalidateFrameCaches,
@@ -721,6 +723,7 @@ export function attachUi({
     reprocess: scheduleProcess,
     addImageFiles: addPerFrameImages,
     isPerFrameModeActive,
+    clearPreviews: clearAllPreviews,
   });
 
   dom.dropZone.addEventListener("dragover", (event) => {

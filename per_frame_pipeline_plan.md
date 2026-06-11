@@ -1089,6 +1089,85 @@ write the AGENTS.md invariants.
 **Out of scope:**
 - New features beyond what Phases 0–8 added.
 
+**As built (Phase 9 — COMPLETE):**
+
+*Composite-area memory ceiling (`js/pipeline.js → runPerFramePipeline`)*
+- New constant `PER_FRAME_COMPOSITE_AREA_CEILING_PX = RECTIFIED_PREVIEW_LONG_EDGE_PX *
+  RECTIFIED_PREVIEW_LONG_EDGE_PX` (= 2200² = 4,840,000 px). This is the exact total-area budget the
+  single-page path already lives within: `matToPreviewCanvas` caps the rectified preview at
+  `RECTIFIED_PREVIEW_LONG_EDGE_PX` on its long edge and the high-res warp is diagonal-capped, so the
+  largest single working sheet is bounded by `RECTIFIED_PREVIEW_LONG_EDGE_PX²`. The stacked
+  `cellW × N × cellH` composite is held to that same area.
+- After the existing per-dimension median clamp (`PER_FRAME_MIN_CELL_PX` 16 / `PER_FRAME_MAX_CELL_PX`
+  1600 — unchanged), `cellW`/`cellH` became `let`. When `cellW * cellH * frameCount >`
+  the ceiling, `scale = Math.sqrt(ceiling / compositeArea)` is applied to BOTH dimensions
+  (`cellW = max(MIN, round(cellW*scale))`, same for `cellH`), so the cell aspect ratio is preserved
+  and the whole sheet fits. With N images the cells shrink uniformly; e.g. 20 × 4000×3000 pages
+  (median cell clamped to 1600×1200, area 1600·1200·20 = 38.4M ≫ 4.84M) scale by
+  `sqrt(4.84M/38.4M) ≈ 0.355` → ~568×426 cells, a ~11.6M-px composite that the tab can hold.
+- Mat lifetime unchanged and explicit: `composite`, each per-cell `resized`, and each `roi` are freed
+  in their `finally` blocks; the uniform downscale only adjusts two scalars before allocation, so it
+  introduces no new Mats and no leak. (Constants + the area-ceiling block were the only edits; this
+  finalizes the Phase 3 deferral.)
+
+*Cache trim (`js/app.js → trimCachesBeforeReprocess`)*
+- Added `trimInactivePerFrameRectifiedCaches()`, called from `trimCachesBeforeReprocess`. It returns
+  immediately unless `state.source.images` is an array of length > 1, then for every index that is NOT
+  `state.source.activeImageIndex` it calls `releaseEntryRectifiedCache(images[i])` (the existing helper
+  in `js/source-images.js`, which frees a bare `Mat` or a `{ visionMat, styledMat }` cache and resets
+  `rectifiedDirty`). It only frees NON-active per-image caches; the active image's cache is kept warm,
+  and the composite `baseRectifiedMat` lives on `state.geometry` (not on any per-image entry), so it is
+  never touched. No-op for markers/markerless (those modes hold ≤1 entry, so the `length <= 1` guard
+  short-circuits).
+
+*Empty-state preview clear (Phase 7 polish item)*
+- Deleting the last image in the strip previously left a stale rectified sheet / animation because the
+  strip's `reprocess` (= `scheduleProcess`) no-ops with no source image. `js/per-frame-strip.js`'s
+  empty-state branch in `deleteImageAt` now calls a new `clearPreviews` dep instead of the no-op
+  `reprocess`. `clearPreviews` is wired to the existing, tested `clearAllPreviews()` (threaded
+  `app.js → wireUiControls` deps → `ui-controls.js attachUi` → `attachPerFrameStrip`), so the empty
+  state blanks the raw canvas and all downstream panels consistently. Low-risk: reuses the same reset
+  that runs at the start of every load; markers/markerless never hit this path (strip is per-frame-only).
+
+*Mobile single-viewer audit (read-only; no bug found)*
+- The mobile viewer tabs (`raw`/`rectified`/`markers`/`preview`) and their cards are always present;
+  their visibility never branches on `alignmentPipeline` (confirmed in `app.js
+  syncMobileViewerLayout` — only the tab TEXT changes via `showFrameCornerControls`, per Phase 6). The
+  per-frame image strip lives in the Photo *control group* (`#perFrameStripPanel`), not in the viewer
+  area, so it does not perturb the single-viewer layout and is reachable via the mobile control tabs.
+  The raw/Page tab renders `renderRawPreview()` of the active image, and `setActiveImage` (Phase 5)
+  calls `renderRawPreview()` on every active-image switch, so switching images updates the Page tab
+  correctly. Conclusion: the Page tab works with the strip and active-image switching as-is — no
+  speculative changes made.
+
+*Documentation additions*
+- `documentation.md`: new "Per-Frame Pipeline" section (+ TOC entry) covering when to use it, the three
+  ways to upload multiple images (drag several / multi-select picker / strip `+` tile), the image strip
+  (select = navigation, drag = reorder/reprocess, delete, add), per-image page-corner / post-rotation
+  editing on the active image, and a cross-reference to the existing "Reloading a per-frame project"
+  subsection (no duplication). The Alignment Pipeline section now says "three workflows" and lists the
+  Per-Frame mode.
+- `AGENTS.md`: Architecture line updated from "two alignment pipelines" to "three" (adds `Per-frame`);
+  the stale "check both pipelines" verification line now reads "all three pipelines". New "Per-Frame
+  Notes" block states the durable invariants: per-image overrides are post-load/pre-rectification and
+  feed `rectifySinglePage` for that image only; active-image switching is UI navigation and does NOT
+  reprocess; per-frame mode disables marker/markerless-specific controls; `_settings.txt` round-trip
+  requires re-uploading images in the same order; and the composite cell-size area ceiling.
+- `llm_readme.md`: new "Per-Frame" subsection under "Current Pipelines" mirroring Markers/Markerless
+  (entry point, per-image rectification, common-cell composite + memory ceiling, synthetic corner
+  lattice, strip, settings round-trip) and pointing back to `per_frame_pipeline_plan.md` for the full
+  plan; the stale "shared by both pipelines" line under Light-on-dark now reads "by the marker and
+  markerless pipelines".
+
+*Validation*
+- `node --check` passes on `js/app.js`, `js/pipeline.js`, `js/ui-controls.js`, `js/per-frame-strip.js`.
+- Markers/markerless are unaffected: the cache trim and empty-state clear are per-frame-only (guarded
+  on `images[]` length / strip-only path), and the pipeline area-ceiling code only runs inside
+  `runPerFramePipeline`.
+- No new i18n strings were added (Phase 9 was memory + docs only).
+
+*Plan status:* the per-frame alignment pipeline is now fully implemented — Phases 0–9 are all COMPLETE.
+
 ---
 
 ## Cross-Cutting Invariants (apply across every phase)
