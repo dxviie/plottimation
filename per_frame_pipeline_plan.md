@@ -137,6 +137,37 @@ into a reusable helper without behavioral change to markers or markerless mode.
 - Any change to `runPipeline`'s output shape.
 - Any change to the marker/markerless detector functions.
 
+**As built (Phase 1 — COMPLETE):**
+- `rectifySinglePage` was implemented in `js/pipeline.js`, taking the
+  **full `config` object** rather than the trimmed `perPageConfig` subset
+  proposed above. The block it owns (`buildFrameGridRectification_fromCrosses`,
+  via the marker path) needs the frame-grid fields (`useRectifiedAsSource`,
+  `frameCols`, `frameRows`, `crossRoiScale`, `paperMarginXPx`, `paperMarginYPx`,
+  `boundarySensitivity`, `boundaryPersistencePx`) in addition to the page-stage
+  fields, so passing a strict subset would have meant re-threading the entire
+  grid config anyway. The JSDoc on `rectifySinglePage` enumerates exactly which
+  `config` keys it reads. Phase 3's per-image call therefore passes a shallow
+  copy of `config` with per-image overrides (see Phase 3, step 2).
+- Actual signature/return:
+  ```
+  rectifySinglePage(sourceCanvas, config, requestId, throwIfAborted)
+    -> { rectifiedWarp, pageQuad, pageQuadSource, pageWarpPreviewCanvas,
+         pageWarpPreviewWidth, pageWarpPreviewHeight,
+         useNearIdentityRectification, threshVal, pageSizeLow, pageSizeHigh }
+  ```
+  `threshVal`, `pageSizeLow`, and `pageSizeHigh` were added beyond the proposed
+  shape so `runPipeline` can keep building byte-identical status text.
+- Mat lifetime: `rectifySinglePage` releases every intermediate Mat in its own
+  `finally` and releases `rectifiedWarp` in its `catch` on failure, so the
+  caller only ever owns a successfully returned `rectifiedWarp`. `runPipeline`'s
+  `finally` shrank to just deleting `rectifiedWarp.visionMat` / `styledMat`.
+- Error handling: `rectifySinglePage` attaches `error.partialResult` for
+  page-stage failures; `runPipeline` only fills it in for later
+  (alignment/extraction) failures, guarded by `!error.partialResult`.
+- Phase 0 spike code in `js/app.js` (the `SPIKE_PER_FRAME` constants and the
+  2-frame composite block in `processCurrentImage`) was removed as part of this
+  work. Verified via demo round-trip; markers and markerless modes unchanged.
+
 ---
 
 ### Phase 2 — State: `state.source.images[]` and active-image accessor
@@ -196,10 +227,36 @@ testing.
   - Add `runPerFramePipeline(images, config, requestId, throwIfAborted)`:
     1. For each `image` in `images`, build a per-image `sourceCanvas` (already
        in `state.source.images[i].canvas`).
-    2. Call `rectifySinglePage(sourceCanvas, perImagePageConfig, …)`. The
-       `perImagePageConfig` is built per image, using that image's
-       `manualPageContour` and `postRotationDeg`.
-    3. Collect rectified `styledMat`s.
+    2. Call `rectifySinglePage(sourceCanvas, perImageConfig, …)`. As implemented
+       in Phase 1, `rectifySinglePage` takes the **full `config` object** (not a
+       trimmed `perPageConfig` subset) and reads the page-relevant fields plus the
+       frame-grid fields needed by the marker rectifier; its JSDoc lists exactly
+       which keys it consumes. So `perImageConfig` is a shallow copy of the base
+       `config` with the per-image fields overridden:
+       ```
+       const perImageConfig = {
+         ...config,
+         // Treat each rectified page as a whole working sheet (no cross sweep,
+         // no frame-grid crop). rectifySinglePage branches its near-identity
+         // fast path and grid rectification on this value, so per-frame mode
+         // must alias to "markerless" here rather than passing "per-frame".
+         alignmentPipeline: "markerless",
+         // Per-image page-corner override (source-space quad) for this image.
+         manualPageQuadPoints: images[i].manualPageContour ?? null,
+         // No live threshold-preview fallback when rectifying per image.
+         fallbackPageQuadPoints: null,
+         // Per-image Post-Rotation (Phase 5 stores this on the image entry).
+         postRotationDeg: images[i].postRotationDeg ?? 0,
+       };
+       ```
+       The base `config.alignmentPipeline` stays `"per-frame"` for the dispatcher
+       and for downstream readConfig/UI gating; only the per-image copy handed to
+       `rectifySinglePage` is aliased to `"markerless"`.
+    3. From each call, take `result.rectifiedWarp`; the caller owns it (per the
+       Phase 1 contract). Use `rectifiedWarp.styledMat` as the cell source and
+       delete `rectifiedWarp.visionMat` immediately (per-frame mode does not run
+       per-image alignment on it). Each `styledMat` is deleted after it has been
+       resized/copied into the composite in step 6.
     4. Decide common cell size:
        - `cellW = clamp(median(rectifiedWidths), MIN_CELL_PX, MAX_CELL_PX)`
        - `cellH = clamp(median(rectifiedHeights), MIN_CELL_PX, MAX_CELL_PX)`
