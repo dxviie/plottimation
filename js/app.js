@@ -36,6 +36,7 @@ import {
   handleFile as loadFileSource,
   loadImageSource as loadImageSourceViaController,
   decodeImageElement,
+  applyPendingPerImageOverrides,
 } from "./load-controller.js";
 import {
   releaseRectifiedDragUrl as releaseRectifiedDragAsset,
@@ -2907,6 +2908,10 @@ async function loadImageSource(src, filename = "", mimeType = "image/jpeg", sett
     invalidateAppearanceCache,
     processCurrentImage,
     drawImageToCanvas,
+    // After a per-frame settings restore reattaches buffered per-image overrides, refresh the active
+    // entry's legacy field + Post-Rotation slider + Page Corners overlay + strip so the editor reflects
+    // the restored values (no-op for single-image markers/markerless loads).
+    refreshActiveImage: setActiveImage,
   });
 }
 
@@ -2987,6 +2992,10 @@ async function addPerFrameImages(files) {
   state.runtime.forcePerFrameMode = true;
   if (dom.alignmentPipelinePerFrame) dom.alignmentPipelinePerFrame.checked = true;
   document.body.classList.add("has-loaded-image");
+
+  // If a per-frame settings file was loaded before any images (the reload story), reattach its
+  // buffered per-image overrides by upload order to the now-present images, then consume the buffer.
+  applyPendingPerImageOverrides(state);
 
   if (startedEmpty) {
     // No active image existed (fresh or fully-emptied strip): adopt the first new entry as active and
@@ -7911,6 +7920,10 @@ function buildSettingsTsv(config) {
     sourceCredit: state.source.sourceCredit,
     manualMarkerOverrides: state.geometry.manualMarkerOverrides,
     manualPageContour: state.source.manualPageContour,
+    // Per-frame mode persists one page-corner/post-rotation override set per uploaded image, keyed by
+    // upload order. buildSettingsTsv only emits the indexed keys when config.alignmentPipeline is
+    // "per-frame", so passing the entries unconditionally is harmless for markers/markerless saves.
+    perImageEntries: state.source.images,
     sanitizeFilenameBase,
   });
 }

@@ -406,6 +406,7 @@ These settings files store the current UI state, including:
 * crop/export settings
 * any manual page-corner overrides
 * any manual marker overrides
+* in per-frame mode, the per-image page-corner overrides and post-rotation for each uploaded image, plus the image count
 * optional metadata
 
 How they are used:
@@ -419,6 +420,14 @@ Note:
 
 * Pressing `Reset` restores built-in defaults, not values from a loaded settings file
 * If you load a lone local image file from the browser file picker, the browser's security settings do not permit the app to inspect the rest of that directory automatically, so a sibling settings file may need to be provided separately.
+
+### Reloading a per-frame project
+
+Settings files do not contain any image data; they only store settings. In per-frame mode, where each uploaded image is one animation frame, this affects how a saved project is reloaded:
+
+* The settings file records each image's per-image page-corner overrides and post-rotation, keyed by upload order (first image, second image, and so on), along with the number of images.
+* To restore a saved per-frame project, re-upload the **same images in the same order** you originally uploaded them. The saved per-image overrides are reattached by upload order — the first image you re-upload receives the overrides saved for image 1, the second receives image 2's, and so on.
+* If you re-upload the images in a different order, or upload a different set of images, the overrides will reattach to the wrong frames. Matching is strictly by upload order; the settings file does not match images by filename.
 
 
 ---

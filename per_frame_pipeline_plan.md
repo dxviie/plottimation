@@ -957,6 +957,91 @@ for very large/many images.
 - Auto-matching by filename across reloads (matching is strictly by upload
   order in v1).
 
+**As built (Phase 8 — COMPLETE):**
+
+*Save side (`js/settings-io.js → buildSettingsTsv`)*
+- `buildSettingsTsv` gained an additive `perImageEntries` param (default `null`; JSDoc updated). The
+  per-frame rows are appended **only** when `config.alignmentPipeline === "per-frame"` and
+  `perImageEntries` is an array, so markers/markerless saves stay byte-identical (the param is passed
+  unconditionally by the caller but ignored outside per-frame mode).
+- Emitted keys (exact names / formats, appended after the page-corner-override and marker-override
+  rows):
+  - `per_frame_image_count<TAB>N` — always emitted in per-frame mode (e.g. `per_frame_image_count\t3`).
+  - `page_corner_override_tl_{i}` / `_tr_{i}` / `_br_{i}` / `_bl_{i}` — emitted as a set of four **only**
+    when image `i` has a valid 4-point `manualPageContour`; reuses the exact single-image
+    `page_corner_override_*` serialization (`${point.x},${point.y}`) suffixed with `_${i}` (e.g.
+    `page_corner_override_tl_1\t1,2`). Images without an override emit nothing.
+  - `per_frame_post_rotation_deg_{i}<TAB>deg` — emitted **only** when image `i`'s `postRotationDeg` is
+    a finite non-zero number (e.g. `per_frame_post_rotation_deg_2\t5`).
+  - `alignment_pipeline\tper-frame` is emitted by the pre-existing `["alignment_pipeline",
+    String(config.alignmentPipeline)]` row (verified — no change needed).
+- Caller `js/app.js → buildSettingsTsv(config)` now passes `perImageEntries: state.source.images`.
+
+*Load side (`js/settings-io.js → applyLoadedSettingsText` + new `parsePerImageOverrides`)*
+- `state.source.pendingPerImageOverrides` is reset to `null` at the top of every load (so a markers
+  file loaded after a per-frame file leaves no stale buffer).
+- Pipeline selection reconciled: `usePerFramePipeline = (pipeline === "per-frame")`. When true:
+  `dom.alignmentPipelinePerFrame.checked = true`, `dom.alignmentPipelineMarkerless.checked = false`,
+  `dom.alignmentPipelineMarkers.checked = false`, and `state.runtime.forcePerFrameMode = true` (mirrors
+  Phase 6's change-listener so radio + flag never diverge). `useMarkerlessPipeline` now also requires
+  `!usePerFramePipeline`, and `markers = !markerless && !perFrame`. For markers/markerless files the
+  truth table is unchanged (`perFrame` false), so legacy selection does not regress. The
+  `dom.alignmentPipelinePerFrame` write is existence-guarded for older DOMs.
+- New `parsePerImageOverrides(entries)` reads `per_frame_image_count` (floored, `>0`, else `0`) and for
+  each index `i` collects the four `page_corner_override_*_{i}` rows (only when all four present and
+  every point parses) and the optional `per_frame_post_rotation_deg_{i}`. Returns
+  `{ count, overrides }` where each `overrides[i]` is `{ manualPageContour, postRotationDeg }` or `null`
+  when image `i` had no saved override of either kind. Called **only** in the per-frame branch; legacy
+  files leave the buffer `null`.
+
+*Pending buffer (`js/dom-state.js`)*
+- `state.source.pendingPerImageOverrides` added (default `null`). Shape:
+  `{ count: number, overrides: Array<{ manualPageContour: {x,y}[] | null, postRotationDeg: number } | null> } | null`.
+  `null` = no pending restore (legacy/markers/markerless). Documented inline in `dom-state.js`. It holds
+  parsed-but-not-yet-applied overrides because a saved project cannot embed image data — the user must
+  re-upload the same N images in the same order.
+
+*Apply-on-arrival (`js/load-controller.js`)*
+- New exported `applyPendingPerImageOverrides(state)` iterates `state.source.images` and, by upload-order
+  index, copies each non-null buffered override onto `images[i].manualPageContour` (deep-copied points)
+  and `images[i].postRotationDeg`, then sets `state.source.pendingPerImageOverrides = null` (consume) and
+  returns `true` if a buffer was present (else `false`).
+- `loadImageSource`'s `image.onload` calls it right after `applyLoadedSettingsText` (so the buffer is
+  fresh) and after the legacy `sourceEntry.manualPageContour` mirror; only when it returns `true` does it
+  call the new `refreshActiveImage?.(activeImageIndex)` dep (= app.js `setActiveImage`) to refresh the
+  active entry's legacy field + Post-Rotation slider + Page Corners overlay + strip. Gating on the return
+  value keeps single-image markers/markerless loads untouched (no `setActiveImage` side effects there).
+- `js/app.js` threads `refreshActiveImage: setActiveImage` into `loadImageSourceViaController`, imports
+  `applyPendingPerImageOverrides`, and also calls it in `addPerFrameImages` (the strip `+` tile / lone
+  settings-file-then-upload path) so a settings file loaded before any images still reattaches its
+  buffered overrides when images arrive via the strip; `setActiveImage(0)` (run when the strip started
+  empty) then refreshes the editor.
+- Consume/clear is verified: a second `applyPendingPerImageOverrides` call returns `false` and mutates
+  nothing, so re-loading images later never reapplies stale overrides.
+
+*`documentation.md`*
+- Added the per-image keys to the "stored settings" list and a new "Reloading a per-frame project"
+  subsection under Sibling Settings Files: settings files contain no image data; to restore a saved
+  per-frame project the user re-uploads the **same images in the same order**, and buffered per-image
+  overrides reattach strictly by upload order (no filename matching).
+
+*Validation*
+- `node --check` passes on `js/settings-io.js`, `js/dom-state.js`, `js/load-controller.js`, `js/app.js`.
+- Round-trip traced + script-verified: per-frame mode, 3 images, image #2 corners + image #3
+  post-rotation → SAVE emits exactly `per_frame_image_count\t3`, `page_corner_override_{tl,tr,br,bl}_1`,
+  `per_frame_post_rotation_deg_2\t5` (nothing for image 0) → LOAD sets `forcePerFrameMode=true` and a
+  buffer `{count:3, overrides:[null, {contour}, {postRotationDeg:5}]}` → apply reattaches to the right
+  entries and clears the buffer (second apply is a no-op).
+- Legacy markers file traced + script-verified: `forcePerFrameMode=false`, buffer stays `null`, no
+  per-frame path triggered, selection unchanged.
+
+*Notes for Phase 9*
+- No Mats allocated, no i18n strings added (settings keys are not localized).
+- Matching is strictly by upload order (no filename matching) — a deliberately deferred item.
+- The empty-after-delete preview-clear and the cell-size/large-image memory ceiling remain Phase 9 work;
+  Phase 8 added no memory bounding. AGENTS.md/llm_readme invariants (incl. the per-frame settings
+  round-trip invariant) are Phase 9 scope and were intentionally NOT added here.
+
 ---
 
 ### Phase 9 — Memory and polish

@@ -301,6 +301,15 @@ export const state = {
     // active entry. During Phase 2 this array always holds 0 or 1 entries. See js/source-images.js.
     images: [],
     activeImageIndex: 0,
+    // Per-frame settings restore buffer. When a per-frame `_settings.txt` is loaded before its images
+    // arrive (the reload story: a saved project cannot embed image data, so the user re-uploads the
+    // same N images in the same order), the parsed per-image overrides are stashed here and applied
+    // to `state.source.images[i]` by upload order as each image arrives, then consumed/cleared.
+    // Shape: { count: number, overrides: Array<{ manualPageContour: {x:number,y:number}[] | null,
+    //          postRotationDeg: number } | null> } | null. `null` means no pending restore (legacy /
+    // markers / markerless files leave this null). Each `overrides[i]` is null when image `i` had no
+    // saved override of either kind.
+    pendingPerImageOverrides: null,
     rawPageContour: null,
     // Tracks where the currently drawn page quad came from; this is display/status metadata, not
     // an instruction to bypass full-resolution page detection.

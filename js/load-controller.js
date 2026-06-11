@@ -72,6 +72,38 @@ export function releaseOwnedSourceUrl(state) {
 }
 
 /**
+ * Reattach buffered per-image overrides (from a per-frame settings restore) to the loaded images.
+ *
+ * `applyLoadedSettingsText` parses a per-frame `_settings.txt`'s indexed page-corner / post-rotation
+ * keys into `state.source.pendingPerImageOverrides` (shape documented in `js/dom-state.js`). Because a
+ * saved project cannot embed image data, those overrides wait here until the user re-uploads the same
+ * N images in the same order; this applies each override to `state.source.images[i]` by upload order
+ * (index 0 → first uploaded image) and clears the buffer so a later re-load never reapplies stale data.
+ *
+ * @param {import("./dom-state.js").state} state
+ * @returns {boolean} `true` when a per-frame restore buffer was present and consumed.
+ */
+export function applyPendingPerImageOverrides(state) {
+  const pending = state.source.pendingPerImageOverrides;
+  if (!pending || !Array.isArray(pending.overrides)) return false;
+  const images = state.source.images || [];
+  for (let index = 0; index < images.length; index += 1) {
+    const override = pending.overrides[index];
+    if (!override) continue;
+    const entry = images[index];
+    if (!entry) continue;
+    entry.manualPageContour =
+      Array.isArray(override.manualPageContour) && override.manualPageContour.length === 4
+        ? override.manualPageContour.map((point) => ({ x: point.x, y: point.y }))
+        : null;
+    entry.postRotationDeg = Number.isFinite(override.postRotationDeg) ? override.postRotationDeg : 0;
+  }
+  // Consume the buffer so a subsequent image load does not reapply these (now-stale) overrides.
+  state.source.pendingPerImageOverrides = null;
+  return true;
+}
+
+/**
  * Test whether a dropped/selected file should be treated as an image source.
  *
  * @param {File | null | undefined} file
@@ -169,6 +201,7 @@ export async function handleFile(file, files = null, { state, loadImageSource, a
  *   invalidateAppearanceCache: () => void,
  *   processCurrentImage: () => Promise<void>,
  *   drawImageToCanvas: (image: HTMLImageElement, canvas: HTMLCanvasElement) => void,
+ *   refreshActiveImage?: (index:number) => void,
  * }} deps
  * @returns {Promise<void>}
  */
@@ -196,6 +229,7 @@ export async function loadImageSource({
   invalidateAppearanceCache,
   processCurrentImage,
   drawImageToCanvas,
+  refreshActiveImage,
 }) {
   releaseOwnedSourceUrl(state);
   if (src.startsWith("blob:")) {
@@ -306,8 +340,19 @@ export async function loadImageSource({
         state.source.settingsLoaded = true;
       }
       // Keep the active entry's page-corner override in sync with the legacy field after any
-      // settings load. Per-image override routing arrives in a later phase; this just mirrors state.
+      // settings load. Per-image override routing (the per-frame buffer below) takes precedence; this
+      // just mirrors the single-image/legacy case.
       sourceEntry.manualPageContour = state.source.manualPageContour ?? null;
+      // Per-frame settings restore: a saved project cannot embed image data, so the user re-uploads the
+      // same N images in the same order. applyLoadedSettingsText parsed the indexed per-image overrides
+      // into state.source.pendingPerImageOverrides; reattach each one to its image by upload order, then
+      // consume the buffer so a later re-load does not reapply stale overrides. Only when overrides were
+      // actually restored do we refresh the active entry's legacy field + Post-Rotation slider + Page
+      // Corners overlay + strip via setActiveImage, so single-image markers/markerless loads are
+      // untouched.
+      if (applyPendingPerImageOverrides(state)) {
+        refreshActiveImage?.(state.source.activeImageIndex);
+      }
       invalidateAppearanceCache();
       setStatus(`${loadedWhat}\n${t("status.analyzingPage")}`);
       await waitForNextPaint();
