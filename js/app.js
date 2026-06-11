@@ -35,6 +35,7 @@ import {
   releaseOwnedSourceUrl as releaseSourceUrl,
   handleFile as loadFileSource,
   loadImageSource as loadImageSourceViaController,
+  decodeImageElement,
 } from "./load-controller.js";
 import {
   releaseRectifiedDragUrl as releaseRectifiedDragAsset,
@@ -73,7 +74,9 @@ import {
   setActiveSourceImage,
   setActiveManualPageContour,
   setActivePostRotationDeg,
+  createSourceImageEntry,
 } from "./source-images.js";
+import { renderPerFrameStrip } from "./per-frame-strip.js";
 // Final output-size scaling can be done either with browser canvas drawImage() or with OpenCV.
 // Keep both code paths available for comparison while evaluating tiny-output quality.
 const bUseOpenCvOutputScaling = true;
@@ -2033,6 +2036,9 @@ function attachUi() {
     endPostRotationScrub,
     finishPostRotationScrubIfUnchanged,
     commitActivePostRotationFromSlider,
+    setActiveImage,
+    isPerFrameModeActive,
+    addPerFrameImages,
     bumpFrameOutputEpoch,
     setGeometryProcessingCursor,
     cancelInFlightProcessing,
@@ -2925,6 +2931,74 @@ function scheduleProcess(delayMs = 220) {
 }
 
 /**
+ * Decode and append additional images as per-frame entries, then reprocess with the new frame count.
+ *
+ * Reuses the Phase 4 decode path (`decodeImageElement`) so the strip's `+` tile and additional drops
+ * share one code path. Each new entry owns its own blob URL + source-resolution canvas. If the strip
+ * was empty (e.g. after deleting every image), the first added entry becomes the active image and the
+ * legacy projections are repointed at it via `setActiveImage`. Forces per-frame mode on so adding
+ * images never silently changes pipelines.
+ *
+ * @param {File[]} files
+ * @returns {Promise<void>}
+ */
+async function addPerFrameImages(files) {
+  const imageFiles = (files || []).filter((file) => file && String(file.type || "").startsWith("image/"));
+  if (imageFiles.length === 0) return;
+
+  setGeometryProcessingCursor(true);
+  const startedEmpty = !Array.isArray(state.source.images) || state.source.images.length === 0;
+  if (!Array.isArray(state.source.images)) state.source.images = [];
+
+  let addedAny = false;
+  for (const file of imageFiles) {
+    const url = URL.createObjectURL(file);
+    let image;
+    try {
+      image = await decodeImageElement(url);
+    } catch {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {
+        /* already revoked */
+      }
+      continue;
+    }
+    const canvas = document.createElement("canvas");
+    drawImageToCanvas(image, canvas);
+    state.source.images.push(
+      createSourceImageEntry({
+        image,
+        filename: file.name || "",
+        mimeType: file.type || "image/jpeg",
+        ownedObjectUrl: url,
+        dragUrl: url,
+        canvas,
+      }),
+    );
+    addedAny = true;
+  }
+  if (!addedAny) {
+    setGeometryProcessingCursor(false);
+    return;
+  }
+
+  // Adding images is an explicit per-frame action; make sure the pipeline is in per-frame mode.
+  state.runtime.forcePerFrameMode = true;
+  if (dom.alignmentPipelinePerFrame) dom.alignmentPipelinePerFrame.checked = true;
+  document.body.classList.add("has-loaded-image");
+
+  if (startedEmpty) {
+    // No active image existed (fresh or fully-emptied strip): adopt the first new entry as active and
+    // repoint the legacy projections so processCurrentImage has a source image to read.
+    setActiveImage(0);
+  }
+  syncAlignmentMarkerUi();
+  renderPerFrameStrip();
+  scheduleProcess(0);
+}
+
+/**
  * Report whether the per-frame alignment pipeline is currently active.
  *
  * Per-frame mode is selected by its own radio (added in Phase 6) or, until then, by a dev/multi-file
@@ -3600,6 +3674,9 @@ function syncAlignmentMarkerUi() {
     }
   }
   syncMarkerlessPhaseDebugUi();
+  // Keep the per-frame strip's visibility + thumbnails in sync with the active pipeline. Idempotent:
+  // hides/empties the strip in markers/markerless modes and only rebuilds on real image[] changes.
+  renderPerFrameStrip();
 }
 
 /**
@@ -7537,6 +7614,8 @@ function setActiveImage(index) {
   syncRawPhotoHeadingLink();
   syncRawPhotoCreditDisplay();
   renderRawPreview();
+  // Refresh the strip's active-thumbnail highlight to match the newly selected image.
+  renderPerFrameStrip();
 }
 
 /**

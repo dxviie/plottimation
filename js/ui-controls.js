@@ -5,6 +5,7 @@
  * can supply callbacks without carrying the full DOM-listener implementation inline.
  */
 import { t } from "./i18n.js";
+import { attachPerFrameStrip } from "./per-frame-strip.js";
 
 /**
  * Wire a small header reset button without toggling the parent details element.
@@ -601,6 +602,9 @@ function attachMarkerlessPhaseMetricToggles({
  *   endPostRotationScrub: () => void,
  *   finishPostRotationScrubIfUnchanged: () => boolean,
  *   commitActivePostRotationFromSlider: () => void,
+ *   setActiveImage: (index:number) => void,
+ *   isPerFrameModeActive: () => boolean,
+ *   addPerFrameImages: (files: File[]) => Promise<void>,
  *   bumpFrameOutputEpoch: () => void,
  *   setGeometryProcessingCursor: (active:boolean) => void,
  *   cancelInFlightProcessing: () => void,
@@ -672,6 +676,9 @@ export function attachUi({
   endPostRotationScrub,
   finishPostRotationScrubIfUnchanged,
   commitActivePostRotationFromSlider,
+  setActiveImage,
+  isPerFrameModeActive,
+  addPerFrameImages,
   bumpFrameOutputEpoch,
   cancelInFlightProcessing,
   invalidateFrameCaches,
@@ -706,6 +713,15 @@ export function attachUi({
 
   makeLivePreviewDragCue();
   makeGifImageDraggable();
+
+  attachPerFrameStrip({
+    dom,
+    state,
+    setActiveImage,
+    reprocess: scheduleProcess,
+    addImageFiles: addPerFrameImages,
+    isPerFrameModeActive,
+  });
 
   dom.dropZone.addEventListener("dragover", (event) => {
     event.preventDefault();

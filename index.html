@@ -68,6 +68,17 @@
 by crosses, dots, or empty gutters.</span>
           </label>
           <input id="fileInput" type="file" accept="image/*,.txt,text/plain" multiple />
+          <!-- Per-frame image strip: visible only in per-frame mode (CSS keys off the
+               `per-frame-pipeline` body class). Lets the user switch the active image, reorder
+               frames (drag), delete frames, and add more. Populated by js/per-frame-strip.js. -->
+          <section id="perFrameStripPanel" class="per-frame-strip-panel" hidden>
+            <div class="per-frame-strip-head">
+              <h3 id="perFrameStripHeading" class="per-frame-strip-heading" data-i18n="photo.strip.heading">Frames</h3>
+              <span id="perFrameStripCount" class="per-frame-strip-count"></span>
+            </div>
+            <div id="perFrameStrip" class="per-frame-strip" role="list"></div>
+            <input id="perFrameStripFileInput" type="file" accept="image/*" multiple hidden />
+          </section>
         </section>
 
         <!-- Top-level choice between markerless gutter fitting and marker-based alignment. -->

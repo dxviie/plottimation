@@ -817,6 +817,101 @@ reorder, and delete.
 - Cross-strip drag (e.g. dragging a thumbnail out of the app).
 - Bulk operations (multi-select delete).
 
+**As built (Phase 7 — COMPLETE):**
+
+*New module `js/per-frame-strip.js`* — exports `attachPerFrameStrip(deps)` and
+`renderPerFrameStrip()`.
+- `attachPerFrameStrip({ dom, state, setActiveImage, reprocess, addImageFiles,
+  isPerFrameModeActive })` binds deps in module scope (single instance) and wires the hidden
+  `#perFrameStripFileInput` `change` handler (the `+` tile's file picker). Called once from
+  `attachUi`.
+- `renderPerFrameStrip()` rebuilds the strip. It hides + empties the panel (sets `panel.hidden =
+  true`, clears children, resets the cached signature) whenever `isPerFrameModeActive()` is false, so
+  markers/markerless modes never see strip markup. When active it diffs a cheap signature
+  (`activeImageIndex | length | per-entry-canvas-presence`) against the last render and early-returns
+  when nothing visible changed, to avoid DOM thrash/flicker. Reorder and delete reset the cached
+  signature to `""` first so a same-length reorder still rebuilds in the new order.
+- Each thumbnail shows the entry image (`<img>` from `entry.dragUrl`, `object-fit: cover` square
+  crop), the 1-based frame number, and a hover/focus delete (`×`) button. The trailing `+` tile opens
+  the file picker and also accepts image drops directly. Click selects active via the app's
+  `setActiveImage(index)` (NO reprocess). Reorder uses HTML5 DnD scoped to the strip (a module-level
+  `dragSourceIndex` recorded on `dragstart`; file drags fall through to the add tile). Reorder splices
+  `state.source.images[]`, keeps the same logical entry active (re-derives its new index via
+  `images.indexOf(activeEntry)` and calls `setActiveImage`), then calls `reprocess()`. Delete splices
+  the entry, releases it (see below), clamps the active index toward the prior neighbor, calls
+  `setActiveImage`, then `reprocess()`; deleting the last image nulls `state.source.image` and leaves
+  only the `+` tile (empty state).
+
+*Delete release path (no leaks):* the strip's `releaseEntry(entry)` revokes `entry.ownedObjectUrl`,
+calls the existing `releaseEntryRectifiedCache(entry)` from `js/source-images.js` (frees a bare `Mat`
+or a `{ visionMat, styledMat }` cache), and nulls `entry.image` / `entry.canvas`. Active index is
+re-clamped via `setActiveSourceImage` (through `setActiveImage`) so it always stays in range.
+
+*Reprocess vs select:* selecting an image routes through the app's `setActiveImage` (Phase 5) → no
+`scheduleProcess`. Reorder and delete both call the `reprocess` dep, which is the app's existing
+`scheduleProcess` (debounced reprocess entry point). `scheduleProcess` no-ops when `state.source.image`
+is null, so deleting the last frame does not reprocess (stale preview lingers until images are
+re-added — acceptable empty state).
+
+*`js/app.js`:* added `addPerFrameImages(files)` — decodes each image via the exported
+`decodeImageElement` (Phase 4), builds an entry with its own blob URL + source canvas via
+`createSourceImageEntry` + `drawImageToCanvas`, pushes to `state.source.images`, forces per-frame mode
+on (`forcePerFrameMode` + ticks the radio), adopts entry 0 as active via `setActiveImage` when the
+strip started empty, then `syncAlignmentMarkerUi()` + `renderPerFrameStrip()` + `scheduleProcess(0)`.
+`renderPerFrameStrip()` is now also called at the tail of `syncAlignmentMarkerUi()` (covers mode
+switch / post-process visibility) and at the tail of `setActiveImage()` (active-highlight refresh).
+`setActiveImage`, `isPerFrameModeActive`, and `addPerFrameImages` are threaded into `wireUiControls`.
+`decodeImageElement` is now exported from `js/load-controller.js`.
+
+*`js/ui-controls.js`:* imports `attachPerFrameStrip` and calls it near the top of `attachUi`, passing
+`reprocess: scheduleProcess` and `addImageFiles: addPerFrameImages`. The three new deps
+(`setActiveImage`, `isPerFrameModeActive`, `addPerFrameImages`) were added to the `attachUi` JSDoc +
+destructure.
+
+*`index.html`:* `#perFrameStripPanel` (a `<section hidden>` inside the Photo control group, below the
+drop zone) containing `#perFrameStripHeading` (`data-i18n="photo.strip.heading"`),
+`#perFrameStripCount` (frame-count readout), `#perFrameStrip` (`role="list"` thumbnail container), and
+a hidden `#perFrameStripFileInput`.
+
+*`js/dom-state.js`:* new `perFrameStrip` group → `dom.perFrameStripPanel`, `dom.perFrameStripHeading`,
+`dom.perFrameStripCount`, `dom.perFrameStrip`, `dom.perFrameStripFileInput`.
+
+*`style.css` (additive):* `.per-frame-strip-panel` (hidden in non-per-frame via
+`body:not(.per-frame-pipeline) .per-frame-strip-panel { display:none }`), `.per-frame-strip-head`,
+`.per-frame-strip-heading`, `.per-frame-strip-count`, `.per-frame-strip` (horizontal scroll),
+`.per-frame-thumb` (+ `.is-active`, `.is-drag-over`, `.is-dragging`), `.per-frame-thumb img`,
+`.per-frame-thumb-number`, `.per-frame-thumb-delete` (hover/focus reveal), `.per-frame-thumb-add`.
+Reuses existing tokens (`--accent`, `--accent-soft`, `--line`, `--radius`, `--muted`,
+`--panel-strong`, `--panel`).
+
+*`js/i18n.js`:* new `photo.strip` subgroup added to **all 13** locale tables, keys: `heading`,
+`frameCount` (`{count}` plural), `frameCountOne` (singular), `addLabel`, `deleteLabel` (`{index}`),
+`selectLabel` (`{index}`). Localized where straightforward, English elsewhere; every table has all 6
+keys (verified 13× each).
+
+*Visibility / legacy safety:* the strip is triple-guarded — HTML `hidden` default, CSS body-class
+gate, and JS `panel.hidden` toggle keyed off `isPerFrameModeActive()`. Markers/markerless flows are
+untouched (the strip is hidden + emptied there and no legacy wiring changed).
+
+*Mobile:* the strip lives in the Photo control group (not the viewer), is horizontally scrollable, and
+does not alter the mobile single-viewer layout; it is reachable from the control panel in all modes
+but only rendered in per-frame mode.
+
+*Mat lifetime:* the strip allocates no OpenCV Mats; deletes route through `releaseEntryRectifiedCache`.
+
+*Validation:* `node --check` passes on `js/per-frame-strip.js`, `js/app.js`, `js/ui-controls.js`,
+`js/dom-state.js`, `js/i18n.js`, `js/load-controller.js`. i18n key counts verified 13× per key.
+
+*Notes for Phases 8–9:* (8) Settings load that restores per-image overrides should call
+`renderPerFrameStrip()` (or `setActiveImage(activeImageIndex)`, which calls it) after applying buffered
+overrides so the strip reflects restored state; the strip already re-renders via `syncAlignmentMarkerUi`
+after processing. (9) The empty-after-delete state currently keeps the prior preview because
+`scheduleProcess` no-ops with no source image — Phase 9 polish could explicitly clear previews there.
+`addPerFrameImages` does not yet enforce the cell-size/large-image ceiling (Phase 9 owns memory
+bounding); thumbnails use `entry.dragUrl` directly (full-res blob in an `<img>` scaled by CSS) rather
+than downscaled thumbnails — fine for typical counts, but Phase 9 may want true thumbnail generation
+for very large/many images.
+
 ---
 
 ### Phase 8 — Settings persistence for per-image state

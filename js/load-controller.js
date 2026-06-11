@@ -47,7 +47,7 @@ export async function waitForNextPaint() {
  * @param {string} src
  * @returns {Promise<HTMLImageElement>}
  */
-function decodeImageElement(src) {
+export function decodeImageElement(src) {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);

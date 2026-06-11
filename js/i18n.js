@@ -33,6 +33,14 @@ const LOCALES = {
       dropNote: "Animation frames should be separated\nby crosses, dots, or empty gutters.",
       dropNoteMarkerless: "Animation frames should be separated\nby crosses, dots, or empty gutters.",
       dropNotePerFrame: "Drop one image per animation frame.\nThey'll be aligned into an animation.",
+      strip: {
+        heading: "Frames",
+        frameCount: "{count} images",
+        frameCountOne: "1 image",
+        addLabel: "Add images",
+        deleteLabel: "Remove frame {index}",
+        selectLabel: "Select frame {index}",
+      },
     },
     layout: {
       summary: "Layout",
@@ -406,6 +414,14 @@ const LOCALES = {
       dropNote: "Los fotogramas de animación deben estar separados\npor cruces, puntos o canales vacíos.",
       dropNoteMarkerless: "Los fotogramas de animación deben estar separados\npor cruces, puntos o canales vacíos.",
       dropNotePerFrame: "Suelta una imagen por cada fotograma.\nSe alinearán en una animación.",
+      strip: {
+        heading: "Fotogramas",
+        frameCount: "{count} imágenes",
+        frameCountOne: "1 imagen",
+        addLabel: "Añadir imágenes",
+        deleteLabel: "Quitar fotograma {index}",
+        selectLabel: "Seleccionar fotograma {index}",
+      },
     },
     layout: {
       summary: "Diseño",
@@ -777,6 +793,14 @@ const LOCALES = {
       dropNote: "I fotogrammi devono essere separati\nda croci, punti o spazi vuoti.",
       dropNoteMarkerless: "I fotogrammi devono essere separati\nda croci, punti o spazi vuoti.",
       dropNotePerFrame: "Trascina un'immagine per ogni fotogramma.\nVerranno allineate in un'animazione.",
+      strip: {
+        heading: "Fotogrammi",
+        frameCount: "{count} immagini",
+        frameCountOne: "1 immagine",
+        addLabel: "Aggiungi immagini",
+        deleteLabel: "Rimuovi fotogramma {index}",
+        selectLabel: "Seleziona fotogramma {index}",
+      },
     },
     layout: {
       summary: "Layout",
@@ -1148,6 +1172,14 @@ const LOCALES = {
       dropNote: "フレームは区切ってください\n十字、点、または空のガターで。",
       dropNoteMarkerless: "フレームは区切ってください\n十字、点、または空のガターで。",
       dropNotePerFrame: "1フレームにつき1枚の画像をドロップ。\n自動で位置合わせしてアニメ化します。",
+      strip: {
+        heading: "フレーム",
+        frameCount: "{count} 枚",
+        frameCountOne: "1 枚",
+        addLabel: "画像を追加",
+        deleteLabel: "フレーム {index} を削除",
+        selectLabel: "フレーム {index} を選択",
+      },
     },
     layout: {
       summary: "レイアウト",
@@ -1519,6 +1551,14 @@ const LOCALES = {
       dropNote: "动画帧之间应分隔\n用十字、圆点或空白间隔。",
       dropNoteMarkerless: "动画帧之间应分隔\n用十字、圆点或空白间隔。",
       dropNotePerFrame: "每帧拖入一张图片。\n它们将被对齐成动画。",
+      strip: {
+        heading: "帧",
+        frameCount: "{count} 张图片",
+        frameCountOne: "1 张图片",
+        addLabel: "添加图片",
+        deleteLabel: "移除第 {index} 帧",
+        selectLabel: "选择第 {index} 帧",
+      },
     },
     layout: {
       summary: "布局",
@@ -1890,6 +1930,14 @@ const LOCALES = {
       dropNote: "動畫影格之間應分隔\n以十字、圓點或空白間隔。",
       dropNoteMarkerless: "動畫影格之間應分隔\n以十字、圓點或空白間隔。",
       dropNotePerFrame: "每格拖入一張圖片。\n它們將被對齊成動畫。",
+      strip: {
+        heading: "影格",
+        frameCount: "{count} 張圖片",
+        frameCountOne: "1 張圖片",
+        addLabel: "新增圖片",
+        deleteLabel: "移除第 {index} 格",
+        selectLabel: "選擇第 {index} 格",
+      },
     },
     layout: {
       summary: "版面",
@@ -2261,6 +2309,14 @@ const LOCALES = {
       dropNote: "애니메이션 프레임은 구분되어야 합니다\n십자, 점 또는 빈 간격으로.",
       dropNoteMarkerless: "애니메이션 프레임은 구분되어야 합니다\n십자, 점 또는 빈 간격으로.",
       dropNotePerFrame: "프레임당 이미지 한 장을 드롭하세요.\n정렬되어 애니메이션이 됩니다.",
+      strip: {
+        heading: "프레임",
+        frameCount: "이미지 {count}장",
+        frameCountOne: "이미지 1장",
+        addLabel: "이미지 추가",
+        deleteLabel: "프레임 {index} 제거",
+        selectLabel: "프레임 {index} 선택",
+      },
     },
     layout: {
       summary: "레이아웃",
@@ -2632,6 +2688,14 @@ const LOCALES = {
       dropNote: "Os quadros da animação devem ser\nseparados por cruzes, pontos\nou espaços vazios.",
       dropNoteMarkerless: "Os quadros da animação devem ser\nseparados por cruzes, pontos\nou espaços vazios.",
       dropNotePerFrame: "Solte uma imagem por quadro da animação.\nElas serão alinhadas em uma animação.",
+      strip: {
+        heading: "Quadros",
+        frameCount: "{count} imagens",
+        frameCountOne: "1 imagem",
+        addLabel: "Adicionar imagens",
+        deleteLabel: "Remover quadro {index}",
+        selectLabel: "Selecionar quadro {index}",
+      },
     },
     layout: {
       summary: "Layout",
@@ -3003,6 +3067,14 @@ const LOCALES = {
       dropNote: "Animationsbilder sollten getrennt sein\ndurch Kreuze, Punkte oder leere Zwischenräume.",
       dropNoteMarkerless: "Animationsbilder sollten getrennt sein\ndurch Kreuze, Punkte oder leere Zwischenräume.",
       dropNotePerFrame: "Ein Bild pro Animationsbild ablegen.\nSie werden zu einer Animation ausgerichtet.",
+      strip: {
+        heading: "Einzelbilder",
+        frameCount: "{count} Bilder",
+        frameCountOne: "1 Bild",
+        addLabel: "Bilder hinzufügen",
+        deleteLabel: "Einzelbild {index} entfernen",
+        selectLabel: "Einzelbild {index} auswählen",
+      },
     },
     layout: {
       summary: "Layout",
@@ -3374,6 +3446,14 @@ const LOCALES = {
       dropNote: "Klatki animacji powinny być oddzielone\nkrzyżykami, kropkami lub pustymi odstępami.",
       dropNoteMarkerless: "Klatki animacji powinny być oddzielone\nkrzyżykami, kropkami lub pustymi odstępami.",
       dropNotePerFrame: "Upuść jeden obraz na każdą klatkę.\nZostaną wyrównane w animację.",
+      strip: {
+        heading: "Klatki",
+        frameCount: "{count} obrazów",
+        frameCountOne: "1 obraz",
+        addLabel: "Dodaj obrazy",
+        deleteLabel: "Usuń klatkę {index}",
+        selectLabel: "Wybierz klatkę {index}",
+      },
     },
     layout: {
       summary: "Układ",
@@ -3745,6 +3825,14 @@ const LOCALES = {
       dropNote: "Animasjonsruter bør være skilt\nmed kryss, prikker eller tomme mellomrom.",
       dropNoteMarkerless: "Animasjonsruter bør være skilt\nmed kryss, prikker eller tomme mellomrom.",
       dropNotePerFrame: "Slipp ett bilde per animasjonsrute.\nDe justeres til en animasjon.",
+      strip: {
+        heading: "Ruter",
+        frameCount: "{count} bilder",
+        frameCountOne: "1 bilde",
+        addLabel: "Legg til bilder",
+        deleteLabel: "Fjern rute {index}",
+        selectLabel: "Velg rute {index}",
+      },
     },
     layout: {
       summary: "Oppsett",
@@ -4116,6 +4204,14 @@ const LOCALES = {
       dropNote: "Кадри анімації мають бути розділені\nхрестиками, крапками або порожніми проміжками.",
       dropNoteMarkerless: "Кадри анімації мають бути розділені\nхрестиками, крапками або порожніми проміжками.",
       dropNotePerFrame: "Перетягніть по одному зображенню на кадр.\nВони вирівняються в анімацію.",
+      strip: {
+        heading: "Кадри",
+        frameCount: "{count} зображень",
+        frameCountOne: "1 зображення",
+        addLabel: "Додати зображення",
+        deleteLabel: "Видалити кадр {index}",
+        selectLabel: "Вибрати кадр {index}",
+      },
     },
     layout: {
       summary: "Макет",
@@ -4487,6 +4583,14 @@ const LOCALES = {
       dropNote: "Les images d’animation doivent être séparées\npar des croix, des points ou des gouttières vides.",
       dropNoteMarkerless: "Les images d’animation doivent être séparées\npar des croix, des points ou des gouttières vides.",
       dropNotePerFrame: "Déposez une image par image d’animation.\nElles seront alignées en une animation.",
+      strip: {
+        heading: "Images",
+        frameCount: "{count} images",
+        frameCountOne: "1 image",
+        addLabel: "Ajouter des images",
+        deleteLabel: "Retirer l’image {index}",
+        selectLabel: "Sélectionner l’image {index}",
+      },
     },
     layout: {
       summary: "Mise en page",

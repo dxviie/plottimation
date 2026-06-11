@@ -47,6 +47,13 @@ const domGroups = {
     fileInput: q("#fileInput"),
     loadDemoSelect: q("#loadDemoSelect"),
   },
+  perFrameStripRefs: {
+    perFrameStripPanel: q("#perFrameStripPanel"),
+    perFrameStripHeading: q("#perFrameStripHeading"),
+    perFrameStripCount: q("#perFrameStripCount"),
+    perFrameStrip: q("#perFrameStrip"),
+    perFrameStripFileInput: q("#perFrameStripFileInput"),
+  },
   groups: {
     layoutGroup: q("#layoutGroup"),
     pageGridDetectionGroup: q("#pageGridDetectionGroup"),
