@@ -39,6 +39,24 @@ export async function waitForNextPaint() {
 }
 
 /**
+ * Decode an image URL into a fully-loaded `HTMLImageElement`.
+ *
+ * Used by the multi-file (per-frame) load path to decode each additional uploaded image into its
+ * own entry. Rejects if the image fails to decode so the caller can skip just that file.
+ *
+ * @param {string} src
+ * @returns {Promise<HTMLImageElement>}
+ */
+function decodeImageElement(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Failed to decode image"));
+    image.src = src;
+  });
+}
+
+/**
  * Release any blob URLs the app currently owns for raw-photo drag/download behavior, including the
  * per-image source entries, so nothing leaks across image reloads.
  *
@@ -93,22 +111,28 @@ function getExpectedSettingsFilename(filename) {
  * @param {FileList | File[] | null} [files=null]
  * @param {{
  *   state: import("./dom-state.js").state,
- *   loadImageSource: (src:string, filename?:string, mimeType?:string, settingsFile?:File | null) => Promise<void>,
+ *   loadImageSource: (src:string, filename?:string, mimeType?:string, settingsFile?:File | null, additionalImageFiles?:File[]) => Promise<void>,
  *   applySettingsFile: (file: File) => Promise<void>
  * }} deps
  * @returns {Promise<void>}
  */
 export async function handleFile(file, files = null, { state, loadImageSource, applySettingsFile }) {
   const allFiles = [...(files || [file])].filter(Boolean);
-  // A drag payload may contain an image plus its sibling settings file, or just a settings file.
-  // Prefer the image when present; otherwise treat a lone settings file as an override request.
-  const imageFile = allFiles.find(isImageFile) || (isImageFile(file) ? file : null);
-  if (imageFile) {
+  // A drag payload may contain one image, several images (one per animation frame), and/or a
+  // sibling settings file. Prefer images when present; otherwise treat a lone settings file as an
+  // override request.
+  const imageFiles = allFiles.filter(isImageFile);
+  const primaryImageFile = imageFiles[0] || (isImageFile(file) ? file : null);
+  if (primaryImageFile) {
     releaseOwnedSourceUrl(state);
-    const url = URL.createObjectURL(imageFile);
-    const settingsFilename = getExpectedSettingsFilename(imageFile.name || "");
+    const url = URL.createObjectURL(primaryImageFile);
+    // A sibling settings file is matched against the first image's name and applied once.
+    const settingsFilename = getExpectedSettingsFilename(primaryImageFile.name || "");
     const siblingSettingsFile = allFiles.find((candidate) => candidate && isSettingsFile(candidate) && candidate.name === settingsFilename) || null;
-    await loadImageSource(url, imageFile.name || "", imageFile.type || "image/jpeg", siblingSettingsFile);
+    // Any images beyond the first become additional per-frame entries; the loader switches into
+    // per-frame mode when more than one image is present so none are silently dropped.
+    const additionalImageFiles = imageFiles.length > 0 ? imageFiles.slice(1) : [];
+    await loadImageSource(url, primaryImageFile.name || "", primaryImageFile.type || "image/jpeg", siblingSettingsFile, additionalImageFiles);
     return;
   }
 
@@ -126,6 +150,7 @@ export async function handleFile(file, files = null, { state, loadImageSource, a
  *   filename?: string,
  *   mimeType?: string,
  *   settingsFile?: File | null,
+ *   additionalImageFiles?: File[],
  *   dom: import("./dom-state.js").dom,
  *   state: import("./dom-state.js").state,
  *   setStatus: (text:string) => void,
@@ -152,6 +177,7 @@ export async function loadImageSource({
   filename = "",
   mimeType = "image/jpeg",
   settingsFile = null,
+  additionalImageFiles = [],
   dom,
   state,
   setStatus,
@@ -212,19 +238,63 @@ export async function loadImageSource({
       syncRawPhotoHeadingLink?.();
       syncRawPhotoCreditDisplay?.();
       state.source.rawPageContour = null;
-      drawImageToCanvas(image, state.source.canvas);
-      // Register this image as the single per-image source entry. The legacy state.source.* fields
-      // continue to project this active entry; later phases grow images[] to more than one entry.
+      // Each per-frame entry owns a distinct source-resolution canvas so runPerFramePipeline can
+      // rectify a different image per cell. The legacy state.source.canvas / image fields project the
+      // active (index 0) entry, keeping single-image markers/markerless callers working unchanged.
+      const activeCanvas = document.createElement("canvas");
+      drawImageToCanvas(image, activeCanvas);
+      state.source.canvas = activeCanvas;
       const sourceEntry = createSourceImageEntry({
         image,
         filename: state.source.filename,
         mimeType: state.source.mimeType,
         ownedObjectUrl: state.source.ownedObjectUrl,
         dragUrl: state.source.dragUrl,
-        canvas: state.source.canvas,
+        canvas: activeCanvas,
       });
-      state.source.images = [sourceEntry];
+      const entries = [sourceEntry];
+      // Decode any additional uploaded images into their own entries (multi-file / per-frame upload).
+      // Each extra image owns its own blob URL and canvas; a failed decode is skipped rather than
+      // aborting the whole load.
+      for (const extraFile of additionalImageFiles) {
+        if (!extraFile) continue;
+        const extraUrl = URL.createObjectURL(extraFile);
+        let extraImage;
+        try {
+          extraImage = await decodeImageElement(extraUrl);
+        } catch {
+          try {
+            URL.revokeObjectURL(extraUrl);
+          } catch {
+            /* already revoked */
+          }
+          continue;
+        }
+        const extraCanvas = document.createElement("canvas");
+        drawImageToCanvas(extraImage, extraCanvas);
+        entries.push(
+          createSourceImageEntry({
+            image: extraImage,
+            filename: extraFile.name || "",
+            mimeType: extraFile.type || "image/jpeg",
+            ownedObjectUrl: extraUrl,
+            dragUrl: extraUrl,
+            canvas: extraCanvas,
+          }),
+        );
+      }
+      state.source.images = entries;
       state.source.activeImageIndex = 0;
+      // Multiple uploaded images mean the user wants the per-frame pipeline (image count = frame
+      // count), so force it on and never silently drop the extras. The real radio arrives in Phase 6;
+      // until then state.runtime.forcePerFrameMode drives readConfig. Ticking the radio when present
+      // keeps this forward-compatible.
+      if (entries.length > 1) {
+        state.runtime.forcePerFrameMode = true;
+        if (dom.alignmentPipelinePerFrame) {
+          dom.alignmentPipelinePerFrame.checked = true;
+        }
+      }
       syncPaperPresetUi?.();
       renderRawPreview();
       const hasSettingsText = !!settingsText.trim();

@@ -2822,15 +2822,18 @@ async function handleFile(file, files = null) {
  * @param {string} src
  * @param {string} [filename=""]
  * @param {string} [mimeType="image/jpeg"]
+ * @param {File | null} [settingsFile=null]
+ * @param {File[]} [additionalImageFiles=[]] Extra images beyond the primary, loaded as per-frame entries.
  * @returns {Promise<void>}
  */
-async function loadImageSource(src, filename = "", mimeType = "image/jpeg", settingsFile = null) {
+async function loadImageSource(src, filename = "", mimeType = "image/jpeg", settingsFile = null, additionalImageFiles = []) {
   clearDemoQueryIfLoadingDifferentFile(filename);
   await loadImageSourceViaController({
     src,
     filename,
     mimeType,
     settingsFile,
+    additionalImageFiles,
     dom,
     state,
     setStatus,

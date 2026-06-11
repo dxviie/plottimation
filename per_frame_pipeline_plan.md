@@ -436,6 +436,42 @@ populate `state.source.images[]`; never silently drop additional images.
 - Reorder/delete buttons (Phase 7).
 - Settings-driven per-image overrides on reload (Phase 8 plus Phase 5).
 
+**As built (Phase 4 — COMPLETE):**
+- `js/load-controller.js`:
+  - Added a module-level `decodeImageElement(src)` helper that resolves a loaded
+    `HTMLImageElement` (rejects on decode failure) for the additional per-frame images.
+  - `handleFile` now collects **all** image files (`imageFiles = allFiles.filter(isImageFile)`),
+    treats the first as the primary, and passes the rest as `additionalImageFiles`
+    (`imageFiles.slice(1)`). The sibling `_settings.txt` is still matched against the **first**
+    image's expected name and applied once. A lone settings file still routes to `applySettingsFile`.
+  - `loadImageSource` gained an `additionalImageFiles = []` dep. In `image.onload` each entry now
+    gets its **own** dedicated source-resolution canvas (`document.createElement("canvas")` +
+    `drawImageToCanvas`), replacing the Phase 2 aliasing of the shared `state.source.canvas`. The
+    legacy `state.source.canvas` is repointed at the active (index 0) entry's canvas, and
+    `state.source.image` continues to project the primary image. Additional images are decoded in a
+    loop; each owns its own blob URL + canvas, and a failed decode revokes that URL and is skipped
+    (it does not abort the whole load). This is one code path for the 1-image and N-image cases.
+  - When more than one image is loaded, per-frame mode is forced on
+    (`state.runtime.forcePerFrameMode = true`, plus `dom.alignmentPipelinePerFrame.checked = true`
+    when that radio exists — forward-compatible with Phase 6). Single-image loads do **not** touch
+    the mode, so a fresh single drop behaves exactly as before. The activation happens before
+    settings application and `processCurrentImage`; because `readConfig` OR-s `forcePerFrameMode`
+    with the radio, multi-image always resolves to per-frame even if a sibling settings file selected
+    markers/markerless.
+  - Mat/URL lifetime is unchanged in spirit: `releaseOwnedSourceUrl` → `releaseAllSourceImages`
+    already revokes every per-entry `ownedObjectUrl` and frees per-entry canvases/Mats on the next
+    load, so the extra blob URLs do not leak.
+- `js/app.js`: the wrapper `loadImageSource(src, filename, mimeType, settingsFile,
+  additionalImageFiles = [])` threads the new argument into `loadImageSourceViaController`. Demo
+  loads (2-arg calls) are unaffected (default `[]`, single image, no per-frame switch).
+- `index.html`: `#fileInput` gained the `multiple` attribute so the file picker allows multi-select.
+- `js/i18n.js`: added a `photo.dropNotePerFrame` string to **all 13** locale tables (per-frame
+  guidance copy, wired into the visible drop note in Phase 6) and extended the generic `dropZone`
+  tooltip in all 13 locales to mention dropping several images at once (one per frame).
+- Not touched: `js/ui-controls.js` (the existing drop/`change` listeners already forward the full
+  `FileList`), the strip UI, reorder/delete, and any settings persistence — all deferred to later
+  phases.
+
 ---
 
 ### Phase 5 — Per-image page-corner and post-rotation overrides
