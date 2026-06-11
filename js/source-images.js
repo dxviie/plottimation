@@ -78,6 +78,47 @@ export function setActiveSourceImage(state, index) {
 }
 
 /**
+ * Store a manual page-corner override for the active image.
+ *
+ * The legacy `state.source.manualPageContour` field is the authoritative input for page detection in
+ * markers / markerless modes and is also read by many UI sites (status text, settings save, overlay
+ * draw). In per-frame mode the canonical per-image override lives on the active entry, so this helper
+ * writes the active entry's `manualPageContour` **and** mirrors to the legacy field so those legacy
+ * read sites keep working without per-frame-specific branching. In markers / markerless mode it only
+ * writes the legacy field (the per-image array is irrelevant there).
+ *
+ * @param {import("./dom-state.js").state} state
+ * @param {Array<{x:number,y:number}> | null} contour Source-space page quad override, or `null` to clear.
+ * @param {boolean} perFrameMode Whether the per-frame pipeline is currently active.
+ * @returns {void}
+ */
+export function setActiveManualPageContour(state, contour, perFrameMode) {
+  state.source.manualPageContour = contour;
+  if (perFrameMode) {
+    const active = getActiveSourceImage(state);
+    if (active) active.manualPageContour = contour;
+  }
+}
+
+/**
+ * Store the Post-Rotation value (degrees) for the active image.
+ *
+ * In per-frame mode each image carries its own Post-Rotation, so this writes the active entry's
+ * `postRotationDeg`. In markers / markerless mode Post-Rotation is a single global value applied by
+ * the pipeline from `config.postRotationDeg`, so the per-image array is left untouched.
+ *
+ * @param {import("./dom-state.js").state} state
+ * @param {number} deg
+ * @param {boolean} perFrameMode Whether the per-frame pipeline is currently active.
+ * @returns {void}
+ */
+export function setActivePostRotationDeg(state, deg, perFrameMode) {
+  if (!perFrameMode) return;
+  const active = getActiveSourceImage(state);
+  if (active) active.postRotationDeg = Number.isFinite(deg) ? deg : 0;
+}
+
+/**
  * Release any cached rectified Mat held on a per-image entry.
  *
  * Handles both a bare OpenCV `Mat` and the `{ visionMat, styledMat }` rectified-warp shape produced

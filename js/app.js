@@ -69,6 +69,11 @@ import {
   extractSingleFrameToCanvas,
 } from "./pipeline.js";
 import { applyTranslations, getTooltipText, t } from "./i18n.js";
+import {
+  setActiveSourceImage,
+  setActiveManualPageContour,
+  setActivePostRotationDeg,
+} from "./source-images.js";
 // Final output-size scaling can be done either with browser canvas drawImage() or with OpenCV.
 // Keep both code paths available for comparison while evaluating tiny-output quality.
 const bUseOpenCvOutputScaling = true;
@@ -1929,6 +1934,11 @@ function init() {
   attachResizeHandler();
   startAnimationPreviewLoop();
   void initializeMp4Support();
+
+  // Until the Phase 7 image strip exists, expose the active-image switch on a small dev handle so
+  // per-frame per-image overrides can be exercised from the console. Phase 7 will call setActiveImage
+  // directly from the strip wiring.
+  window.plottimation = Object.assign(window.plottimation || {}, { setActiveImage });
 }
 
 /**
@@ -2022,6 +2032,7 @@ function attachUi() {
     beginPostRotationScrub,
     endPostRotationScrub,
     finishPostRotationScrubIfUnchanged,
+    commitActivePostRotationFromSlider,
     bumpFrameOutputEpoch,
     setGeometryProcessingCursor,
     cancelInFlightProcessing,
@@ -2529,6 +2540,38 @@ function finishPostRotationScrubIfUnchanged() {
 }
 
 /**
+ * Read the Post-Rotation slider value, clamped to the slider's range.
+ *
+ * @returns {number}
+ */
+function readPostRotationSliderDeg() {
+  return Math.max(
+    -1.1,
+    Math.min(
+      1.1,
+      Number.isFinite(Number(dom.postRotation?.value))
+        ? Number(dom.postRotation.value)
+        : SETTINGS_DEFAULTS.detection.postRotationDeg
+    )
+  );
+}
+
+/**
+ * Persist the current Post-Rotation slider value onto the active per-frame image entry.
+ *
+ * In per-frame mode each image carries its own Post-Rotation; the global slider edits the active
+ * image's value so reprocessing rectifies that image with its own rotation. In markers / markerless
+ * mode this is a no-op (Post-Rotation stays a single global value read from `config.postRotationDeg`),
+ * so legacy behavior is unchanged.
+ *
+ * @returns {void}
+ */
+function commitActivePostRotationFromSlider() {
+  if (!isPerFrameModeActive()) return;
+  setActivePostRotationDeg(state, readPostRotationSliderDeg(), true);
+}
+
+/**
  * Populate the resampling dropdown with only the interpolation modes available in this OpenCV build.
  *
  * @returns {void}
@@ -2876,6 +2919,20 @@ function scheduleProcess(delayMs = 220) {
 }
 
 /**
+ * Report whether the per-frame alignment pipeline is currently active.
+ *
+ * Per-frame mode is selected by its own radio (added in Phase 6) or, until then, by a dev/multi-file
+ * flag (`state.runtime.forcePerFrameMode`). The radio ref is read with optional chaining so this is
+ * forward-compatible with Phase 6 wiring `dom.alignmentPipelinePerFrame`. This matches the detection
+ * `readConfig` uses, so per-image override routing and the active config stay consistent.
+ *
+ * @returns {boolean}
+ */
+function isPerFrameModeActive() {
+  return !!dom.alignmentPipelinePerFrame?.checked || !!state.runtime.forcePerFrameMode;
+}
+
+/**
  * Read the current UI state and normalize it into a processing/export config object.
  *
  * @returns {{
@@ -2945,9 +3002,8 @@ function readConfig() {
   const frameRows = Math.max(1, Math.min(20, Math.round(Number(dom.frameRows.value) || SETTINGS_DEFAULTS.layout.frameRows)));
   const sourceFrameCount = Math.max(1, frameCols * frameRows);
   // Per-frame mode is selected by its own radio (added in Phase 6) or, until then, by a dev flag so
-  // the pipeline can be exercised before the UI exists. The radio ref is read with optional chaining
-  // so this stays correct both before and after Phase 6 wires `dom.alignmentPipelinePerFrame`.
-  const perFrameModeActive = !!dom.alignmentPipelinePerFrame?.checked || !!state.runtime.forcePerFrameMode;
+  // the pipeline can be exercised before the UI exists. See isPerFrameModeActive for details.
+  const perFrameModeActive = isPerFrameModeActive();
   const encodingQuality = getEncodingQualityValue();
   const readSearchInset = (input, fallback) => Math.max(
     0,
@@ -3563,7 +3619,9 @@ function togglePageCornerEditing() {
  */
 function clearPageCornerEdits() {
   if (!Array.isArray(state.source.manualPageContour) || state.source.manualPageContour.length !== 4) return;
-  state.source.manualPageContour = null;
+  // Clearing the override drops it from the active image entry too in per-frame mode (legacy-only
+  // otherwise). Subsequent reprocessing re-detects this image's page automatically.
+  setActiveManualPageContour(state, null, isPerFrameModeActive());
   state.preview.activePageCornerDrag = null;
   state.runtime.pageCornerEditingEnabled = false;
   cancelPageCornerOverrideDependentWork();
@@ -7203,7 +7261,9 @@ function seedDefaultManualPageContour() {
     { x: right, y: bottom },
     { x: inset, y: bottom },
   ];
-  state.source.manualPageContour = contour.map((point) => ({ x: point.x, y: point.y }));
+  // Seeding a default editable quad is a manual override, so mirror it to the active image entry in
+  // per-frame mode (legacy-only otherwise).
+  setActiveManualPageContour(state, contour.map((point) => ({ x: point.x, y: point.y })), isPerFrameModeActive());
   state.source.rawPageContour = contour.map((point) => ({ x: point.x, y: point.y }));
   state.source.pageQuadSource = "manual-override";
   state.source.thresholdPreviewPageContour = null;
@@ -7297,7 +7357,9 @@ function updateManualPageCorner(index, point) {
   if (!Array.isArray(baseContour) || baseContour.length !== 4) return;
   const nextContour = baseContour.map((corner) => ({ x: corner.x, y: corner.y }));
   nextContour[index] = point;
-  state.source.manualPageContour = nextContour;
+  // In per-frame mode this also stores the override on the active image entry; in markers/markerless
+  // it only writes the legacy field, exactly as before.
+  setActiveManualPageContour(state, nextContour, isPerFrameModeActive());
   state.source.rawPageContour = nextContour.map((corner) => ({ x: corner.x, y: corner.y }));
   state.source.pageQuadSource = "manual-override";
 }
@@ -7372,6 +7434,53 @@ function attachRawPageCornerEditing() {
 
   dom.rawCanvas.addEventListener("pointerup", finishDrag);
   dom.rawCanvas.addEventListener("pointercancel", finishDrag);
+}
+
+/**
+ * Switch the active per-frame image and redraw the raw photo, Page Corners overlay, and
+ * Post-Rotation slider to match it — without rebuilding the rectified preview or animation.
+ *
+ * Active-image switching is UI navigation, not a config change: each image's page-corner override and
+ * Post-Rotation are restored from its entry so the editor operates on the newly active image, but no
+ * reprocessing is scheduled (the existing composite stays live until a real config change). In
+ * markers / markerless modes there is at most one entry, so this just refreshes the raw preview.
+ *
+ * Until the Phase 7 image strip exists this is the supported active-image switch entry point (the
+ * dev console can call `window.plottimation.setActiveImage(1)` or set
+ * `state.source.activeImageIndex` and call `renderRawPreview()` directly).
+ *
+ * @param {number} index Zero-based image index (clamped to the loaded range).
+ * @returns {void}
+ */
+function setActiveImage(index) {
+  const entry = setActiveSourceImage(state, index);
+  if (!entry) return;
+  // Repoint the legacy projections at the newly active entry so every existing reader (raw preview,
+  // Page Corners editor, drag/download, status) sees this image.
+  if (entry.canvas) state.source.canvas = entry.canvas;
+  if (entry.image) state.source.image = entry.image;
+  state.source.filename = entry.filename || "";
+  state.source.mimeType = entry.mimeType || "";
+  state.source.dragUrl = entry.dragUrl || "";
+  // Restore this image's manual page-corner override into the legacy field and the overlay contour.
+  // A live threshold preview belongs to whichever image was last reprocessed, so drop it on switch.
+  const contour = Array.isArray(entry.manualPageContour) && entry.manualPageContour.length === 4
+    ? entry.manualPageContour.map((point) => ({ x: point.x, y: point.y }))
+    : null;
+  state.source.manualPageContour = contour;
+  state.source.rawPageContour = contour ? contour.map((point) => ({ x: point.x, y: point.y })) : null;
+  state.source.pageQuadSource = contour ? "manual-override" : "";
+  state.source.thresholdPreviewPageContour = null;
+  state.source.thresholdPreviewSignature = "";
+  state.preview.activePageCornerDrag = null;
+  // Restore this image's Post-Rotation onto the slider so the control reflects the active image.
+  if (dom.postRotation) {
+    dom.postRotation.value = String(Number.isFinite(entry.postRotationDeg) ? entry.postRotationDeg : 0);
+    updateSliderReadouts();
+  }
+  syncRawPhotoHeadingLink();
+  syncRawPhotoCreditDisplay();
+  renderRawPreview();
 }
 
 /**

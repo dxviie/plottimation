@@ -581,6 +581,7 @@ function attachMarkerlessPhaseMetricToggles({
  *   beginPostRotationScrub: () => void,
  *   endPostRotationScrub: () => void,
  *   finishPostRotationScrubIfUnchanged: () => boolean,
+ *   commitActivePostRotationFromSlider: () => void,
  *   bumpFrameOutputEpoch: () => void,
  *   setGeometryProcessingCursor: (active:boolean) => void,
  *   cancelInFlightProcessing: () => void,
@@ -651,6 +652,7 @@ export function attachUi({
   beginPostRotationScrub,
   endPostRotationScrub,
   finishPostRotationScrubIfUnchanged,
+  commitActivePostRotationFromSlider,
   bumpFrameOutputEpoch,
   cancelInFlightProcessing,
   invalidateFrameCaches,
@@ -989,6 +991,9 @@ export function attachUi({
       revokeGifUrl();
       updateSliderReadouts();
       if (finishPostRotationScrubIfUnchanged()) return;
+      // Per-frame mode stores Post-Rotation per image, so persist the slider value onto the active
+      // image before reprocessing. No-op (and unchanged behavior) in markers / markerless mode.
+      commitActivePostRotationFromSlider?.();
       scheduleProcess();
     });
   }

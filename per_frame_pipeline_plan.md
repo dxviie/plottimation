@@ -515,6 +515,72 @@ on the *active* image in per-frame mode.
   dev console (`state.source.activeImageIndex = 1; renderRawPreview();`).
 - Persisting overrides to disk (Phase 8).
 
+**As built (Phase 5 — COMPLETE):**
+- The per-image accessors this phase needs (`setActiveManualPageContour(state,
+  contour, perFrameMode)` and `setActivePostRotationDeg(state, deg, perFrameMode)`)
+  already live in `js/source-images.js` — they take an explicit `perFrameMode`
+  boolean rather than re-deriving the mode inside the module, so `source-images.js`
+  stays DOM-free. `setActiveManualPageContour` always writes the legacy
+  `state.source.manualPageContour` and, only when `perFrameMode`, also mirrors to
+  the active entry's `manualPageContour`. `setActivePostRotationDeg` writes **only**
+  the active entry's `postRotationDeg` and is a no-op outside per-frame mode (the
+  legacy global stays the slider/`config.postRotationDeg`). No new accessors were
+  needed.
+- `js/app.js`:
+  - New `isPerFrameModeActive()` helper centralizes mode detection as
+    `!!dom.alignmentPipelinePerFrame?.checked || !!state.runtime.forcePerFrameMode`
+    (optional-chained for the not-yet-existing Phase 6 radio). `readConfig` now
+    calls it instead of inlining the same expression, so config emission and
+    override routing can never diverge.
+  - The three user-driven manual page-corner write sites now route through
+    `setActiveManualPageContour(state, …, isPerFrameModeActive())`:
+    `updateManualPageCorner` (corner drag), `seedDefaultManualPageContour` (the
+    inset-rectangle seed when detection fails), and `clearPageCornerEdits` (the
+    `null` clear). Each preserves its existing `rawPageContour` / `pageQuadSource`
+    bookkeeping verbatim. The `clearAllPreviews` reset (start-of-load) was left as a
+    direct legacy `= null` on purpose: it is a global preview reset that runs while
+    the `images[]` array is about to be rebuilt, not a per-image edit.
+  - Post-Rotation: `readPostRotationSliderDeg()` (clamped slider read, factored from
+    the existing duplicated clamp) and `commitActivePostRotationFromSlider()` were
+    added. The latter writes the slider value onto the active entry **only** in
+    per-frame mode and is wired into the Post-Rotation slider's `change` handler in
+    `ui-controls.js` (before `scheduleProcess()`, after the unchanged-scrub early
+    return). In markers/markerless mode it early-returns, so the legacy slider →
+    `config.postRotationDeg` → pipeline path is byte-for-byte unchanged.
+  - New `setActiveImage(index)` performs the active-image switch as **UI
+    navigation, not a config change**: it calls `setActiveSourceImage`, repoints the
+    legacy projections (`canvas`, `image`, `filename`, `mimeType`, `dragUrl`) at the
+    new entry, restores that entry's `manualPageContour` into the legacy field +
+    overlay `rawPageContour` (or clears them), drops any stale live threshold
+    preview, restores the entry's `postRotationDeg` onto the slider
+    (`dom.postRotation.value` + `updateSliderReadouts()`), refreshes the raw-photo
+    heading/credit, and calls `renderRawPreview()`. It deliberately does **not**
+    call `scheduleProcess()` — the existing composite/animation stays live until a
+    real config change. It is exposed as `window.plottimation.setActiveImage` so it
+    can be exercised before the Phase 7 strip exists (the dev-console
+    `activeImageIndex = …; renderRawPreview()` route still works but won't restore
+    the slider/contour; prefer `setActiveImage`).
+- `js/ui-controls.js`: added `commitActivePostRotationFromSlider` to the `attachUi`
+  deps (JSDoc + destructure) and called it in the Post-Rotation `change` handler.
+  No other listeners changed.
+- `js/dom-state.js`: **not touched** — the per-image `manualPageContour` /
+  `postRotationDeg` fields and `state.runtime.forcePerFrameMode` already exist from
+  Phases 2–4, so the plan's listing of `dom-state.js` for Phase 5 was a no-op.
+- No Mats allocated, no i18n strings added, Page Detection Threshold stayed global.
+- **Notes for later phases:** (6) Phase 6 makes `dom.alignmentPipelinePerFrame`
+  real; `isPerFrameModeActive()` already prefers it, so no app.js change is needed
+  there for detection. (7) The strip should call `setActiveImage(index)` on
+  thumbnail click (do not poke `state.source.activeImageIndex` directly — that skips
+  the slider/contour restore); after reorder/delete it should re-derive the active
+  index and call `setActiveImage` before reprocessing. (8) Settings load must
+  populate each entry's `manualPageContour` / `postRotationDeg`; for the active
+  entry it should also refresh the legacy field + slider (or just call
+  `setActiveImage(activeImageIndex)` afterwards) so the editor reflects the restored
+  values. The post-rotation scrub *preview* (Panel 3 live rotation) is still
+  markerless-gated (`config.alignmentPipeline !== "markerless"` skips it), so in
+  per-frame mode the slider commits on `change` but does not show a live scrub
+  preview — wiring that for per-frame is left as later polish.
+
 ---
 
 ### Phase 6 — `alignmentPipeline` radio: add "per-frame"
