@@ -286,6 +286,10 @@ export const state = {
     dragUrl: "",
     ownedObjectUrl: "",
     canvas: document.createElement("canvas"),
+    // Per-image source entries for the per-frame pipeline. The legacy fields above project the
+    // active entry. During Phase 2 this array always holds 0 or 1 entries. See js/source-images.js.
+    images: [],
+    activeImageIndex: 0,
     rawPageContour: null,
     // Tracks where the currently drawn page quad came from; this is display/status metadata, not
     // an instruction to bypass full-resolution page detection.

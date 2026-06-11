@@ -214,6 +214,38 @@ transparently.
 - Per-image overrides. (Phase 5.)
 - Any UI for the image strip.
 
+**As built (Phase 2 — COMPLETE):**
+- `state.source` gained `images: []` and `activeImageIndex: 0` in `js/dom-state.js`.
+  The legacy `state.source.image / filename / mimeType / dragUrl / ownedObjectUrl /
+  canvas / manualPageContour` fields stay populated and are treated as projections
+  of the active entry.
+- New module `js/source-images.js` exports:
+  - `createSourceImageEntry(fields)` — builds an entry with the documented shape
+    (`image, filename, mimeType, ownedObjectUrl, dragUrl, canvas,
+    manualPageContour, postRotationDeg, rectifiedMatCache: null,
+    rectifiedDirty: true`).
+  - `getActiveSourceImage(state)` — active entry or `null`.
+  - `setActiveSourceImage(state, index)` — clamps and returns the new active entry.
+  - `releaseAllSourceImages(state)` — revokes per-entry blob URLs, frees cached
+    Mats, resets `images` to `[]` and `activeImageIndex` to `0`.
+  - `releaseEntryRectifiedCache(entry)` — helper that frees either a bare `Mat` or
+    a `{ visionMat, styledMat }` rectified-warp cache (added beyond the proposed
+    list because Phase 9 / Phase 3 caches use that shape).
+- `js/load-controller.js`:
+  - `loadImageSource`'s `image.onload` now registers the loaded image as the single
+    entry (`state.source.images = [entry]; activeImageIndex = 0`). The entry's
+    `canvas` aliases the shared `state.source.canvas` (only one image exists in this
+    phase); the entry's `manualPageContour` is mirrored from the legacy field after
+    any settings file is applied. **Note for Phase 4:** this canvas aliasing is only
+    safe while `images[]` holds at most one entry — Phase 4 must give each entry its
+    own dedicated canvas (see Phase 4 scope).
+  - `releaseOwnedSourceUrl(state)` now wraps `releaseAllSourceImages(state)` before
+    revoking the legacy `ownedObjectUrl`, so loading a new image clears prior
+    `images[]` entries and no blob URLs leak across reloads.
+- No mode logic, multi-file handling, per-image overrides, or strip UI were added.
+  Markers/markerless flows are unaffected (changes are additive; the legacy fields
+  the pipeline reads remain authoritative).
+
 ---
 
 ### Phase 3 — Pipeline: `runPerFramePipeline` + dispatcher
@@ -324,6 +356,17 @@ populate `state.source.images[]`; never silently drop additional images.
   the drag payload (or file input), build per-image entries for each. Sibling
   `_settings.txt` is still matched against the first image's filename and applied
   once after all images are loaded.
+- **Per-entry canvases (carried over from Phase 2):** Phase 2 left each entry's
+  `canvas` aliasing the shared `state.source.canvas`, which is only safe while
+  `images[]` holds at most one entry. Phase 4 introduces multiple entries, so each
+  entry **must** get its own dedicated source-resolution `canvas` drawn from its
+  own decoded image (do not reuse the shared `state.source.canvas` for more than
+  one entry, or every cell in `runPerFramePipeline` would rectify the same image).
+  The legacy `state.source.canvas` / `state.source.image` should then project the
+  **active** entry (e.g. point `state.source.canvas` at
+  `images[activeImageIndex].canvas`), so legacy single-image callers keep reading
+  the active image. Update the single-image load path accordingly so it produces a
+  per-entry canvas too, keeping one code path for the 1-image and N-image cases.
 - `index.html`: `<input id="fileInput" … multiple />` and drop-zone copy update.
 - `js/i18n.js`: drop-zone copy strings for per-frame mode (and a generic copy
   that mentions multi-file support; localize across all locale tables).
@@ -345,6 +388,8 @@ populate `state.source.images[]`; never silently drop additional images.
 - File picker with multi-select: same behavior as drag.
 - Mixed drag (N images + 1 `_settings.txt`): settings file is applied against
   the first image's name; per-frame mode is selected if N > 1.
+- Each loaded entry has its own distinct `canvas` (no two entries share a canvas
+  reference, and none alias the shared `state.source.canvas` once N > 1).
 
 **Out of scope:**
 - Strip UI (Phase 7).

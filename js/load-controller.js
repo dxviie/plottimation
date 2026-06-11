@@ -5,6 +5,7 @@
  * and the staged process of loading a new source image into the app.
  */
 import { t } from "./i18n.js";
+import { createSourceImageEntry, releaseAllSourceImages } from "./source-images.js";
 /**
  * Toggle the small busy spinners used during image loading and processing.
  *
@@ -38,12 +39,15 @@ export async function waitForNextPaint() {
 }
 
 /**
- * Release any blob URL that the app currently owns for raw-photo drag/download behavior.
+ * Release any blob URLs the app currently owns for raw-photo drag/download behavior, including the
+ * per-image source entries, so nothing leaks across image reloads.
  *
  * @param {import("./dom-state.js").state} state
  * @returns {void}
  */
 export function releaseOwnedSourceUrl(state) {
+  // Revoke per-image blob URLs and free cached Mats; clears state.source.images back to empty.
+  releaseAllSourceImages(state);
   if (!state.source.ownedObjectUrl) return;
   URL.revokeObjectURL(state.source.ownedObjectUrl);
   state.source.ownedObjectUrl = "";
@@ -209,6 +213,18 @@ export async function loadImageSource({
       syncRawPhotoCreditDisplay?.();
       state.source.rawPageContour = null;
       drawImageToCanvas(image, state.source.canvas);
+      // Register this image as the single per-image source entry. The legacy state.source.* fields
+      // continue to project this active entry; later phases grow images[] to more than one entry.
+      const sourceEntry = createSourceImageEntry({
+        image,
+        filename: state.source.filename,
+        mimeType: state.source.mimeType,
+        ownedObjectUrl: state.source.ownedObjectUrl,
+        dragUrl: state.source.dragUrl,
+        canvas: state.source.canvas,
+      });
+      state.source.images = [sourceEntry];
+      state.source.activeImageIndex = 0;
       syncPaperPresetUi?.();
       renderRawPreview();
       const hasSettingsText = !!settingsText.trim();
@@ -219,6 +235,9 @@ export async function loadImageSource({
         applyLoadedSettingsText(settingsText);
         state.source.settingsLoaded = true;
       }
+      // Keep the active entry's page-corner override in sync with the legacy field after any
+      // settings load. Per-image override routing arrives in a later phase; this just mirrors state.
+      sourceEntry.manualPageContour = state.source.manualPageContour ?? null;
       invalidateAppearanceCache();
       setStatus(`${loadedWhat}\n${t("status.analyzingPage")}`);
       await waitForNextPaint();
