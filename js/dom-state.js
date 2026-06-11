@@ -97,6 +97,7 @@ const domGroups = {
     alignmentPipelineField: q("#alignmentPipelineField"),
     alignmentPipelineMarkerless: q("#alignmentPipelineMarkerless"),
     alignmentPipelineMarkers: q("#alignmentPipelineMarkers"),
+    alignmentPipelinePerFrame: q("#alignmentPipelinePerFrame"),
     stabilizationMethodGroup: q("#stabilizationMethodGroup"),
     stabilizationMethodField: q("#stabilizationMethodField"),
     stabilizationMethodPairwise: q("#stabilizationMethodPairwise"),

@@ -92,6 +92,7 @@ export function initializeTooltips({ tooltipText, state, dom, applyTooltipState 
  *
  * @param {{
  *   dom: import("./dom-state.js").dom,
+ *   state: import("./dom-state.js").state,
  *   revokeGifUrl: () => void,
  *   updateSliderReadouts: () => void,
  *   scheduleProcess: (delayMs?: number) => void,
@@ -101,25 +102,43 @@ export function initializeTooltips({ tooltipText, state, dom, applyTooltipState 
  */
 function attachAlignmentPipelineControls({
   dom,
+  state,
   revokeGifUrl,
   updateSliderReadouts,
   scheduleProcess,
   syncAlignmentMarkerUi,
 }) {
   const alignmentDom = dom.alignment;
-  [alignmentDom.alignmentPipelineMarkerless, alignmentDom.alignmentPipelineMarkers].forEach((input) => {
-    input.addEventListener("input", () => {
-      syncAlignmentMarkerUi();
-      revokeGifUrl();
-      updateSliderReadouts();
-      scheduleProcess();
+  // The radio group is now the authoritative source of pipeline mode. A multi-image load set the
+  // legacy `forcePerFrameMode` shim (and ticked the per-frame radio); once the user interacts with
+  // the radio, reconcile the shim to the radio so switching *out* of per-frame actually sticks.
+  const reconcilePerFrameForceFlag = () => {
+    state.runtime.forcePerFrameMode = !!alignmentDom.alignmentPipelinePerFrame?.checked;
+  };
+  [
+    alignmentDom.alignmentPipelineMarkerless,
+    alignmentDom.alignmentPipelineMarkers,
+    alignmentDom.alignmentPipelinePerFrame,
+  ]
+    .filter(Boolean)
+    .forEach((input) => {
+      input.addEventListener("input", () => {
+        reconcilePerFrameForceFlag();
+        syncAlignmentMarkerUi();
+        revokeGifUrl();
+        updateSliderReadouts();
+        // Switching into per-frame mode before any images are uploaded must not process — there is
+        // nothing to rectify yet. `scheduleProcess` already no-ops when `state.source.image` is null
+        // (which is the empty-`images[]` case), so just wait for the upload to drive processing.
+        scheduleProcess();
+      });
+      input.addEventListener("change", () => {
+        reconcilePerFrameForceFlag();
+        syncAlignmentMarkerUi();
+        revokeGifUrl();
+        scheduleProcess();
+      });
     });
-    input.addEventListener("change", () => {
-      syncAlignmentMarkerUi();
-      revokeGifUrl();
-      scheduleProcess();
-    });
-  });
 }
 
 /**
@@ -816,6 +835,7 @@ export function attachUi({
 
   attachAlignmentPipelineControls({
     dom,
+    state,
     revokeGifUrl,
     updateSliderReadouts,
     scheduleProcess,

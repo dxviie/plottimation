@@ -2095,7 +2095,9 @@ async function initializeMp4Support() {
  */
 function applyManualMarkerOverrides(alignmentInfo) {
   if (!alignmentInfo) return;
-  if (readConfig().alignmentPipeline === "markerless") return;
+  // Non-marker pipelines (markerless + per-frame) interpret corner overrides as post-stabilization
+  // nudges, not in-place marker patches, so this marker-only fast path is skipped for both.
+  if (readConfig().alignmentPipeline !== "markers") return;
   for (const [key, override] of state.geometry.manualMarkerOverrides.entries()) {
     const marker = alignmentInfo.markerLookup.get(key);
     const tile = alignmentInfo.crossRoiTileMap?.get(key);
@@ -2276,6 +2278,9 @@ function resetExportControls() {
  */
 function resetNonLayoutControls() {
   applyNonLayoutDefaults(dom);
+  // `applyNonLayoutDefaults` restores the pipeline radio to the default ("markers"); clear the
+  // legacy per-frame force shim too so `isPerFrameModeActive()` agrees with the reset radio.
+  state.runtime.forcePerFrameMode = false;
   state.geometry.manualMarkerOverrides.clear();
   state.preview.activeEditedMarker = null;
   state.runtime.markerEditingEnabled = false;
@@ -2396,7 +2401,8 @@ function scheduleStabilizationPreviewUpdate() {
  * @returns {void}
  */
 function beginStabilizationStrengthScrub() {
-  if (readConfig().alignmentPipeline === "markerless") {
+  // Stabilization is available in markerless and per-frame; warm the solver for both non-marker modes.
+  if (readConfig().alignmentPipeline !== "markers") {
     scheduleCurrentStabilizationWarmup();
   }
   if (state.preview.stabilizationStrengthScrubbing) return;
@@ -3260,13 +3266,14 @@ function syncPaperPresetUi() {
 }
 
 function getActiveAlignmentPipeline() {
+  if (isPerFrameModeActive()) return "per-frame";
   return dom.alignmentPipelineMarkerless.checked ? "markerless" : "markers";
 }
 
 /**
  * Preserve the markerless default of zero Grid Search Inset X/Y when switching away from marker mode.
  *
- * @param {"markerless"|"markers"} pipeline
+ * @param {"markerless"|"markers"|"per-frame"} pipeline
  * @returns {void}
  */
 function applyAlignmentPipelineDefaults(pipeline) {
@@ -3286,7 +3293,7 @@ function applyAlignmentPipelineDefaults(pipeline) {
 /**
  * Ensure marker-pipeline-only controls hold a valid state before being shown again.
  *
- * @param {"markerless"|"markers"} pipeline
+ * @param {"markerless"|"markers"|"per-frame"} pipeline
  * @returns {void}
  */
 function sanitizeAlignmentPipelineState(pipeline) {
@@ -3303,31 +3310,48 @@ function sanitizeAlignmentPipelineState(pipeline) {
 /**
  * Return which alignment-specific control groups should be visible for the active pipeline.
  *
- * @param {"markerless"|"markers"} pipeline
- * @returns {{showMarkerlessControls:boolean,showMarkersPipelineControls:boolean,showCrossOnlyControls:boolean}}
+ * `showMarkerlessControls` stays strictly markerless-only (markerless gutter/phase/working-image
+ * diagnostics must not leak into per-frame mode). `showFrameCornerControls` is the broader
+ * "non-marker" family (markerless + per-frame) that shares stabilization, drift compensation and the
+ * Frame Corners override editor. `isPerFrame` lets callers hide markerless-only controls that the
+ * non-marker family would otherwise reveal (e.g. gutter sliders, Grid Edge controls).
+ *
+ * @param {"markerless"|"markers"|"per-frame"} pipeline
+ * @returns {{showMarkerlessControls:boolean,showMarkersPipelineControls:boolean,showCrossOnlyControls:boolean,showFrameCornerControls:boolean,isPerFrame:boolean}}
  */
 function getAlignmentUiModeFlags(pipeline) {
   document.body.classList.toggle("markerless-pipeline", pipeline === "markerless");
+  document.body.classList.toggle("per-frame-pipeline", pipeline === "per-frame");
   const markerType = dom.alignmentMarkerType.value || SETTINGS_DEFAULTS.detection.alignmentMarkerType;
   const resolvedAutoType = state.geometry.alignmentInfo?.resolvedMarkerType || null;
   const showMarkersPipelineControls = pipeline === "markers";
   const showCrossOnlyControls = showMarkersPipelineControls && (markerType === "crosses" || (markerType === "auto" && resolvedAutoType === "crosses"));
   const showMarkerlessControls = pipeline === "markerless";
+  const isPerFrame = pipeline === "per-frame";
+  const showFrameCornerControls = pipeline !== "markers";
   return {
     showMarkerlessControls,
     showMarkersPipelineControls,
     showCrossOnlyControls,
+    showFrameCornerControls,
+    isPerFrame,
   };
 }
 
 /**
  * Rewrite alignment-related labels so the UI language matches the active pipeline.
  *
- * @param {{showMarkerlessControls:boolean}} flags
+ * Per-frame mode shares the corner/stabilization mental model with markerless mode, so the
+ * non-marker label family (`showFrameCornerControls`) drives the Frame Corners heading, the
+ * stabilize/centers viewer tabs and the ROI-size label. `showMarkerlessControls` is reserved for
+ * the markerless-only "summaryMarkerless" copy that mentions gutter fitting, which does not apply
+ * to per-frame's synthetic exact grid.
+ *
+ * @param {{showMarkerlessControls:boolean,showFrameCornerControls:boolean,isPerFrame:boolean}} flags
  * @returns {void}
  */
 function syncAlignmentPipelineLabels(flags) {
-  const { showMarkerlessControls } = flags;
+  const { showMarkerlessControls, showFrameCornerControls, isPerFrame } = flags;
   const frameAlignmentSummary = document.querySelector("#frameAlignmentSummary");
   const frameAlignmentSummaryLabel =
     frameAlignmentSummary?.querySelector("[data-i18n='alignment.summary']") ||
@@ -3337,26 +3361,26 @@ function syncAlignmentPipelineLabels(flags) {
     frameAlignmentSummaryLabel.textContent = showMarkerlessControls ? t("alignment.summaryMarkerless") : t("alignment.summary");
   }
   if (dropGuidanceNote) {
-    dropGuidanceNote.textContent = t("photo.dropNote");
+    dropGuidanceNote.textContent = isPerFrame ? t("photo.dropNotePerFrame") : t("photo.dropNote");
   }
   const isMobileViewerMode = state.runtime.mobileSingleViewerMode;
   const headingText = isMobileViewerMode
-    ? t(showMarkerlessControls ? "viewerTabs.centers" : "viewerTabs.markers")
-    : t(showMarkerlessControls ? "panels.frameCorners" : "panels.frameAlignmentMarkers");
+    ? t(showFrameCornerControls ? "viewerTabs.centers" : "viewerTabs.markers")
+    : t(showFrameCornerControls ? "panels.frameCorners" : "panels.frameAlignmentMarkers");
   if (dom.crossRegionsHeading) {
     const label = dom.crossRegionsHeading.querySelector("[data-panel-heading]") || dom.crossRegionsHeading.firstElementChild;
     if (label) label.textContent = headingText;
   }
   if (dom.viewerTabMarkers) {
-    const viewerTabKey = showMarkerlessControls ? "viewerTabs.centers" : "viewerTabs.markers";
+    const viewerTabKey = showFrameCornerControls ? "viewerTabs.centers" : "viewerTabs.markers";
     dom.viewerTabMarkers.textContent = t(viewerTabKey);
   }
   if (dom.mobileControlTabAlignment) {
-    const mobileControlTabKey = showMarkerlessControls ? "mobileControlTabs.stabilize" : "mobileControlTabs.markers";
+    const mobileControlTabKey = showFrameCornerControls ? "mobileControlTabs.stabilize" : "mobileControlTabs.markers";
     dom.mobileControlTabAlignment.textContent = t(mobileControlTabKey);
   }
   if (dom.crossRoiScaleLabel) {
-    dom.crossRoiScaleLabel.textContent = showMarkerlessControls
+    dom.crossRoiScaleLabel.textContent = showFrameCornerControls
       ? t("alignment.frameCornerRoiSize")
       : t("alignment.roiSize");
   }
@@ -3372,17 +3396,17 @@ function syncAlignmentPipelineLabels(flags) {
   if (markerlessPhaseYLabel) {
     markerlessPhaseYLabel.textContent = t("alignment.markerlessPhaseYOffset");
   }
-  syncAlignmentModeTooltips(showMarkerlessControls);
+  syncAlignmentModeTooltips(showFrameCornerControls);
 }
 
 /**
  * Keep shared tooltip text aligned with the active pipeline when marker terminology becomes
- * corner/stabilization terminology in markerless mode.
+ * corner/stabilization terminology in the non-marker (markerless / per-frame) pipelines.
  *
- * @param {boolean} showMarkerlessControls
+ * @param {boolean} showFrameCornerControls
  * @returns {void}
  */
-function syncAlignmentModeTooltips(showMarkerlessControls) {
+function syncAlignmentModeTooltips(showFrameCornerControls) {
   const applyTooltip = (element, key, extraElements = []) => {
     if (!element) return;
     const text = t(`tooltip.${key}`);
@@ -3403,37 +3427,40 @@ function syncAlignmentModeTooltips(showMarkerlessControls) {
 
   applyTooltip(
     document.querySelector("#frameAlignmentSummary"),
-    showMarkerlessControls ? "frameAlignmentSummaryMarkerless" : "frameAlignmentSummary",
+    showFrameCornerControls ? "frameAlignmentSummaryMarkerless" : "frameAlignmentSummary",
   );
   applyTooltip(
     dom.crossRegionsHeading,
-    showMarkerlessControls ? "crossRegionsHeadingMarkerless" : "crossRegionsHeading",
+    showFrameCornerControls ? "crossRegionsHeadingMarkerless" : "crossRegionsHeading",
   );
   applyTooltip(
     dom.crossRoiScale,
-    showMarkerlessControls ? "crossRoiScaleMarkerless" : "crossRoiScale",
+    showFrameCornerControls ? "crossRoiScaleMarkerless" : "crossRoiScale",
     [dom.crossRoiScale?.closest("label")],
   );
   applyTooltip(
     dom.toggleMarkerEditingButton,
-    showMarkerlessControls ? "toggleMarkerEditingButtonMarkerless" : "toggleMarkerEditingButton",
+    showFrameCornerControls ? "toggleMarkerEditingButtonMarkerless" : "toggleMarkerEditingButton",
   );
   applyTooltip(
     dom.clearMarkerEditsButton,
-    showMarkerlessControls ? "clearMarkerEditsButtonMarkerless" : "clearMarkerEditsButton",
+    showFrameCornerControls ? "clearMarkerEditsButtonMarkerless" : "clearMarkerEditsButton",
   );
 }
 
 /**
  * Keep the shared ROI-size slider in the right position for the active alignment mode.
  *
- * @param {{showMarkerlessControls:boolean}} flags
+ * Per-frame mode shares the markerless Frame Corners layout, so the corner ROI slider sits at the
+ * bottom of the stack for both non-marker pipelines.
+ *
+ * @param {{showFrameCornerControls:boolean}} flags
  * @returns {void}
  */
 function syncAlignmentSliderOrder(flags) {
-  const { showMarkerlessControls } = flags;
+  const { showFrameCornerControls } = flags;
   if (dom.alignmentSliderStack && dom.crossRoiScaleRow) {
-    if (showMarkerlessControls) {
+    if (showFrameCornerControls) {
       dom.alignmentSliderStack.appendChild(dom.crossRoiScaleRow);
     } else {
       dom.alignmentSliderStack.prepend(dom.crossRoiScaleRow);
@@ -3444,27 +3471,38 @@ function syncAlignmentSliderOrder(flags) {
 /**
  * Show or hide the alignment controls appropriate for the active pipeline.
  *
- * @param {{showMarkerlessControls:boolean,showMarkersPipelineControls:boolean,showCrossOnlyControls:boolean}} flags
+ * Three control families:
+ * - Stabilization + Vertical Drift Compensation are the shared non-marker family
+ *   (`showFrameCornerControls`): visible in markerless AND per-frame.
+ * - Grid Edge Threshold / Run Length are marker-only grid controls: shown only in markers
+ *   (`showMarkersPipelineControls`), so they are hidden in BOTH markerless and per-frame.
+ * - Markerless gutter/phase sliders (`markerlessPhase*Row`) stay markerless-only
+ *   (`showMarkerlessControls`): hidden in per-frame because the synthetic grid needs no phase sweep.
+ *
+ * @param {{showMarkerlessControls:boolean,showMarkersPipelineControls:boolean,showCrossOnlyControls:boolean,showFrameCornerControls:boolean}} flags
  * @returns {void}
  */
 function syncAlignmentPipelineVisibility(flags) {
-  const { showMarkerlessControls, showMarkersPipelineControls, showCrossOnlyControls } = flags;
-  dom.boundarySensitivityRow.hidden = showMarkerlessControls;
-  dom.boundaryPersistenceRow.hidden = showMarkerlessControls;
+  const { showMarkerlessControls, showMarkersPipelineControls, showCrossOnlyControls, showFrameCornerControls } = flags;
+  // Grid Edge Threshold / Run Length are marker-grid controls: keep visible only in markers mode so
+  // per-frame (which has no detected grid edges) hides them alongside markerless.
+  dom.boundarySensitivityRow.hidden = !showMarkersPipelineControls;
+  dom.boundaryPersistenceRow.hidden = !showMarkersPipelineControls;
   if (dom.stabilizationMethodGroup) {
-    dom.stabilizationMethodGroup.hidden = !showMarkerlessControls;
+    dom.stabilizationMethodGroup.hidden = !showFrameCornerControls;
   }
   if (dom.stabilizationEnabledRow) {
-    dom.stabilizationEnabledRow.hidden = !showMarkerlessControls;
+    dom.stabilizationEnabledRow.hidden = !showFrameCornerControls;
   }
   if (dom.stabilizationStrengthRow) {
-    dom.stabilizationStrengthRow.hidden = !showMarkerlessControls;
+    dom.stabilizationStrengthRow.hidden = !showFrameCornerControls;
   }
   dom.alignmentMarkerTypeField.hidden = !showMarkersPipelineControls;
   // Keep marker subpixel alignment as a settings-file/default option, not a visible UI control.
   dom.useCrossAlignmentRow.hidden = true;
   dom.detectCrossesWithConvolutionRow.hidden = !showCrossOnlyControls;
-  dom.stabilizationLambdaRow.hidden = !showMarkerlessControls;
+  dom.stabilizationLambdaRow.hidden = !showFrameCornerControls;
+  // Markerless gutter/phase sweep sliders remain markerless-only; per-frame's exact grid skips them.
   dom.markerlessPhaseXRow.hidden = !showMarkerlessControls;
   dom.markerlessPhaseYRow.hidden = !showMarkerlessControls;
   if (dom.markerlessPhaseDebugRow) {
@@ -3479,23 +3517,24 @@ function syncAlignmentPipelineVisibility(flags) {
   if (dom.markerlessUseVarianceRow) {
     dom.markerlessUseVarianceRow.hidden = true;
   }
-  dom.verticalDriftCompensationRow.hidden = !showMarkerlessControls;
+  dom.verticalDriftCompensationRow.hidden = !showFrameCornerControls;
 }
 
 /**
- * Enable only the stabilization controls that apply to the current markerless method.
+ * Enable only the stabilization controls that apply to the current method.
  *
  * `Stabilization Rigidity` (`lambda`) only affects the pairwise/cyclic least-squares solve. The
  * alternate average-reference method does not use it, so the slider should be visibly inactive in
- * that mode to avoid implying that it has any effect.
+ * that mode to avoid implying that it has any effect. Per-frame mode runs the same stabilization
+ * solver as markerless, so it shares this gating via `showFrameCornerControls`.
  *
- * @param {{showMarkerlessControls:boolean}} flags
+ * @param {{showFrameCornerControls:boolean}} flags
  * @returns {void}
  */
 function syncStabilizationMethodUi(flags) {
-  const { showMarkerlessControls } = flags;
+  const { showFrameCornerControls } = flags;
   const usesLambda =
-    showMarkerlessControls &&
+    showFrameCornerControls &&
     (dom.stabilizationMethodPairwise?.checked || !dom.stabilizationMethodAverage?.checked);
   if (dom.stabilizationLambda) {
     dom.stabilizationLambda.disabled = !usesLambda;
@@ -3705,8 +3744,10 @@ function clearMarkerEdits() {
   state.geometry.manualMarkerOverrides.clear();
   state.preview.activeEditedMarker = null;
   state.runtime.markerEditingEnabled = false;
-  const isMarkerless = readConfig().alignmentPipeline === "markerless";
-  if (state.geometry.alignmentInfo && !isMarkerless) {
+  // Non-marker pipelines (markerless + per-frame) store overrides as corner nudges, so they take the
+  // same cache-clearing revert path; only true marker mode patches the live marker objects in place.
+  const usesCornerNudges = readConfig().alignmentPipeline !== "markers";
+  if (state.geometry.alignmentInfo && !usesCornerNudges) {
     // Original auto-detected positions are cached on the live alignment objects so edits can revert instantly
     // without rerunning the whole detector.
     for (const [key, marker] of state.geometry.alignmentInfo.markerLookup.entries()) {
@@ -3724,7 +3765,7 @@ function clearMarkerEdits() {
     }
   }
   revokeGifUrl();
-  if (isMarkerless) {
+  if (usesCornerNudges) {
     state.frames.base = new Array(state.geometry.frameCount);
     state.frames.baseOutputEpoch = new Array(state.geometry.frameCount);
     state.frames.stabilizedCache.clear();
@@ -3901,7 +3942,7 @@ function updateSliderReadouts() {
     return;
   }
   const config = readConfig();
-  const roiSizePx = config.alignmentPipeline === "markerless"
+  const roiSizePx = config.alignmentPipeline !== "markers"
     ? estimateMarkerlessCornerTileSidePx(
         state.geometry.alignmentInfo.rectifiedWidth,
         state.geometry.alignmentInfo.rectifiedHeight,
@@ -4310,7 +4351,8 @@ async function processCurrentImage(requestId = state.processing.requestId) {
     updatePageGridDetectionHeading(false);
     setStatus(buildStatusWithTiming(result.statusText));
     schedulePreviewFrameWarmup(requestId);
-    if (config.alignmentPipeline === "markerless") {
+    // Stabilization runs in both non-marker pipelines, so warm its solver after per-frame too.
+    if (config.alignmentPipeline !== "markers") {
       scheduleMarkerlessStabilizationWarmup(requestId);
     }
   } catch (error) {
@@ -4847,7 +4889,9 @@ function getPreviewFrameQuadForSourceIndex(sourceIndex) {
   const row = Math.floor(sourceIndex / cols);
   if (row < 0 || row >= alignmentInfo.rows) return null;
   const extractionInfo =
-    readConfig().alignmentPipeline === "markerless"
+    // Per-frame uses the same corner-cross lattice as markerless, so resolve preview frame quads
+    // through the markerless extraction builder for both non-marker pipelines.
+    readConfig().alignmentPipeline !== "markers"
       ? buildMarkerlessExtractionInfoForFrame(alignmentInfo, col, row)
       : alignmentInfo;
   const quad = resolveFrameQuadForPreview(extractionInfo, col, row);
@@ -4932,7 +4976,8 @@ function drawOmittedFrameQuads(ctx, mapRectifiedPointToPreview) {
  */
 function resolveDisplayedAlignmentPoint(alignmentInfo, col, row) {
   const key = getMarkerKey(col, row);
-  if (readConfig().alignmentPipeline === "markerless") {
+  // Per-frame shares the markerless corner-display model (phase + stabilization + manual nudge).
+  if (readConfig().alignmentPipeline !== "markers") {
     const sourceMarker = alignmentInfo?.markerLookup?.get(key);
     if (sourceMarker) {
       const displayed = getMarkerlessDisplayedCorner(sourceMarker, col, row, alignmentInfo);
@@ -5604,7 +5649,10 @@ function getFrameGridCoords(index, alignmentInfo) {
  * @returns {object}
  */
 function getFrameExtractionAlignmentInfo(config, alignmentInfo, col, row, includeMarkerlessNudges) {
-  if (config.alignmentPipeline === "markerless" && includeMarkerlessNudges) {
+  // Per-frame extracts from the same corner-cross lattice as markerless, so both non-marker
+  // pipelines resolve frame quads via the markerless extraction builder (phase nudges are 0 in
+  // per-frame, so this only contributes stabilization/drift/manual-nudge offsets there).
+  if (config.alignmentPipeline !== "markers" && includeMarkerlessNudges) {
     return buildMarkerlessExtractionInfoForFrame(alignmentInfo, col, row);
   }
   return alignmentInfo;
@@ -6094,7 +6142,8 @@ function scheduleMarkerlessStabilizationWarmup(requestId) {
  */
 function scheduleCurrentStabilizationWarmup() {
   window.setTimeout(() => {
-    if (readConfig().alignmentPipeline !== "markerless") {
+    // Stabilization warmup applies to both non-marker pipelines (markerless + per-frame).
+    if (readConfig().alignmentPipeline === "markers") {
       return;
     }
     if (!readConfig().stabilizationEnabled) {
@@ -6737,7 +6786,8 @@ function combineSourceOffsets(baseOffset, extraOffset) {
  * @returns {{x:number,y:number}}
  */
 function getMarkerlessVerticalDriftSourceOffset(config, alignmentInfo, frameIndex) {
-  if (!alignmentInfo || config.alignmentPipeline !== "markerless") {
+  // Vertical Drift Compensation is enabled in both non-marker pipelines (markerless + per-frame).
+  if (!alignmentInfo || config.alignmentPipeline === "markers") {
     return { x: 0, y: 0 };
   }
   const cellHeight = alignmentInfo.gridBounds.height / Math.max(1, alignmentInfo.rows);
@@ -6786,7 +6836,8 @@ function getAutomaticMarkerlessSourceOffset(config, alignmentInfo, frameIndex, i
  * @returns {{x:number,y:number}}
  */
 function getMarkerlessCornerStabilizationOffset(col, row, alignmentInfo) {
-  if (!alignmentInfo || readConfig().alignmentPipeline !== "markerless") {
+  // Stabilization and the Frame Corners panel are shared by both non-marker pipelines.
+  if (!alignmentInfo || readConfig().alignmentPipeline === "markers") {
     return { x: 0, y: 0 };
   }
   const offsets = getStabilizationOffsets();
@@ -6848,7 +6899,8 @@ function getFrameStabilizationSourceOffset(index) {
  * @returns {{x:number,y:number}}
  */
 function getMarkerlessCornerManualNudge(col, row) {
-  if (readConfig().alignmentPipeline !== "markerless") {
+  // Frame Corners overrides (stored as corner nudges) are enabled in markerless and per-frame.
+  if (readConfig().alignmentPipeline === "markers") {
     return { x: 0, y: 0 };
   }
   const override = state.geometry.manualMarkerOverrides.get(getMarkerKey(col, row));
@@ -7087,8 +7139,12 @@ function buildPostRotationPreviewTile(previewCanvas, expected, alignmentInfo, te
 }
 
 /**
- * Build a display-only alignment view for markerless mode that incorporates the current manual
- * phase offset while leaving the underlying stored marker coordinates unphased.
+ * Build a display-only alignment view for the non-marker pipelines (markerless + per-frame) that
+ * incorporates the current corner display offsets while leaving the stored coordinates unphased.
+ *
+ * Per-frame shares the markerless corner-tile display path so its Frame Corners panel renders the
+ * same stabilized/nudged corner tiles. Only true marker mode short-circuits to the raw alignment
+ * (or, while scrubbing post-rotation, the marker post-rotation preview tiles).
  *
  * @param {object | null} alignmentInfo
  * @returns {object | null}
@@ -7097,7 +7153,7 @@ function getDisplayAlignmentInfo(alignmentInfo) {
   if (!alignmentInfo) return null;
   const config = readConfig();
   const showingPostRotationPreview = state.preview.postRotationScrubbing && !!state.preview.rectifiedCanvas;
-  if (config.alignmentPipeline !== "markerless" && !showingPostRotationPreview) {
+  if (config.alignmentPipeline === "markers" && !showingPostRotationPreview) {
     return alignmentInfo;
   }
   const crossRoiScale = config.crossRoiScale;
@@ -7105,7 +7161,7 @@ function getDisplayAlignmentInfo(alignmentInfo) {
     ? getPostRotationPreviewCanvas(state.preview.rectifiedCanvas, getPostRotationPreviewDeg())
     : null;
 
-  if (config.alignmentPipeline !== "markerless") {
+  if (config.alignmentPipeline === "markers") {
     const markerLookup = new Map(alignmentInfo.markerLookup);
     const crossRoiTiles = alignmentInfo.crossRoiTiles.map((tile) => buildPostRotationPreviewTile(
       previewCanvas,
@@ -7650,9 +7706,12 @@ function applyMarkerOverride(tile, local, finalize) {
   let detectedX = roiCenterX + (local.x - center);
   let detectedY = roiCenterY + (local.y - center);
   const config = readConfig();
-  const isMarkerless = config.alignmentPipeline === "markerless";
+  // Per-frame shares the markerless corner-nudge override model (stored as deltas from the displayed
+  // corner), so both non-marker pipelines take the nudge path; only true marker mode stores absolute
+  // detected positions and patches the marker objects in place.
+  const usesCornerNudges = config.alignmentPipeline !== "markers";
   const key = getMarkerKey(tile.col, tile.row);
-  if (isMarkerless && state.geometry.alignmentInfo) {
+  if (usesCornerNudges && state.geometry.alignmentInfo) {
     const sourceMarker = state.geometry.alignmentInfo.markerLookup.get(key);
     if (sourceMarker) {
       const displayed = getMarkerlessDisplayedCorner(sourceMarker, tile.col, tile.row, state.geometry.alignmentInfo, false);
@@ -7665,37 +7724,37 @@ function applyMarkerOverride(tile, local, finalize) {
     state.geometry.manualMarkerOverrides.set(key, { x: detectedX, y: detectedY });
   }
   state.preview.activeEditedMarker = finalize ? null : { col: tile.col, row: tile.row };
-  if (state.geometry.alignmentInfo && !isMarkerless) {
+  if (state.geometry.alignmentInfo && !usesCornerNudges) {
     // Manual overrides patch the already-detected alignment object in place, which lets preview/extraction
     // update lazily from the edited marker positions without another CV pass.
     applyManualMarkerOverrides(state.geometry.alignmentInfo);
   }
   revokeGifUrl();
   if (!finalize) {
-    if (isMarkerless) {
+    if (usesCornerNudges) {
       beginMarkerOverrideScrub();
     } else {
       state.preview.markerOverrideScrubbing = true;
     }
   }
   let affectedMarkerFrames = null;
-  if (isMarkerless && !finalize) {
+  if (usesCornerNudges && !finalize) {
     invalidateCurrentPreviewFrameForMarker(tile.col, tile.row);
-  } else if (isMarkerless) {
+  } else if (usesCornerNudges) {
     invalidateMarkerlessNudgedFramesForMarker(tile.col, tile.row);
   } else {
     affectedMarkerFrames = invalidateFramesForMarker(tile.col, tile.row);
   }
   syncMarkerEditingUi();
   if (finalize) {
-    if (isMarkerless) {
+    if (usesCornerNudges) {
       endMarkerOverrideScrub();
     } else {
       state.preview.markerOverrideScrubbing = false;
     }
     renderCrossRoiGrid(state.geometry.alignmentInfo);
     scheduleStabilizationPreviewUpdate();
-    if (!isMarkerless) {
+    if (!usesCornerNudges) {
       if (affectedMarkerFrames) {
         scheduleCurrentPreviewFrameWarmupForSourceIndices(affectedMarkerFrames);
       } else {
@@ -7717,8 +7776,10 @@ function restoreMarkerOverride(tile) {
   const key = getMarkerKey(tile.col, tile.row);
   state.geometry.manualMarkerOverrides.delete(key);
   state.preview.activeEditedMarker = null;
-  const isMarkerless = readConfig().alignmentPipeline === "markerless";
-  if (state.geometry.alignmentInfo && !isMarkerless) {
+  // Non-marker pipelines (markerless + per-frame) clear corner-nudge overrides via cache
+  // invalidation; only marker mode restores auto-detected positions on the live marker objects.
+  const usesCornerNudges = readConfig().alignmentPipeline !== "markers";
+  if (state.geometry.alignmentInfo && !usesCornerNudges) {
     const marker = state.geometry.alignmentInfo.markerLookup.get(key);
     const liveTile = state.geometry.alignmentInfo.crossRoiTileMap?.get(key);
     if (marker && Number.isFinite(marker.autoDetectedX)) {
@@ -7734,7 +7795,7 @@ function restoreMarkerOverride(tile) {
   }
   revokeGifUrl();
   let affectedMarkerFrames = null;
-  if (isMarkerless) {
+  if (usesCornerNudges) {
     invalidateMarkerlessNudgedFramesForMarker(tile.col, tile.row);
   } else {
     affectedMarkerFrames = invalidateFramesForMarker(tile.col, tile.row);
@@ -7742,7 +7803,7 @@ function restoreMarkerOverride(tile) {
   syncMarkerEditingUi();
   renderCrossRoiGrid(state.geometry.alignmentInfo);
   scheduleStabilizationPreviewUpdate();
-  if (!isMarkerless) {
+  if (!usesCornerNudges) {
     if (affectedMarkerFrames) {
       scheduleCurrentPreviewFrameWarmupForSourceIndices(affectedMarkerFrames);
     } else {

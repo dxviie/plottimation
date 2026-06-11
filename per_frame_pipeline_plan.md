@@ -640,6 +640,136 @@ and wire mode-gated visibility.
 - The image strip itself (Phase 7).
 - Settings persistence (Phase 8).
 
+**As built (Phase 6 — COMPLETE):**
+
+*New radio + DOM/i18n wiring*
+- `index.html`: added a third radio `#alignmentPipelinePerFrame` (`name="alignmentPipeline"`,
+  `value="per-frame"`) to `#alignmentPipelineField`, with a `<span data-i18n="alignment.pipelineOptions.perFrame">`
+  label matching the two siblings.
+- `js/dom-state.js`: added `alignmentPipelinePerFrame: q("#alignmentPipelinePerFrame")` to the
+  `alignment` group (auto-flattened to `dom.alignmentPipelinePerFrame`). No new container refs were
+  needed — visibility is gated entirely through the existing alignment rows plus a new body class.
+- `js/settings-defaults.js`: default stays `"markers"`. `applyNonLayoutDefaults` now also sets
+  `dom.alignmentPipelinePerFrame.checked = (default === "per-frame")` (guarded by existence), so
+  reset/sync drives all three radios consistently.
+- `js/ui-controls.js`: the per-frame radio joins the `attachAlignmentPipelineControls` `input`/`change`
+  listeners (`.filter(Boolean)` so a missing ref is harmless). Switching into per-frame with no images
+  loaded does NOT process — `scheduleProcess` already no-ops when `state.source.image` is null (the
+  empty-`images[]` case), so the handler just waits for upload. The handler also calls
+  `reconcilePerFrameForceFlag()` which sets `state.runtime.forcePerFrameMode` to the per-frame radio's
+  checked state, so once the user interacts with the radio it becomes authoritative and switching
+  *out* of per-frame after a multi-image load actually sticks (the Phase 4 shim no longer pins the
+  mode). `attachAlignmentPipelineControls` gained `state` in its deps for this.
+- `js/app.js`: `readConfig`/`isPerFrameModeActive` already emit `"per-frame"` from Phase 5; verified
+  they now resolve through the real radio. `getActiveAlignmentPipeline()` now returns `"per-frame"`
+  when `isPerFrameModeActive()` (else markerless/markers as before). `resetNonLayoutControls` clears
+  `state.runtime.forcePerFrameMode = false` so a reset truly returns to the default markers pipeline.
+
+*Mode flags (new in `getAlignmentUiModeFlags`)*
+- `showMarkerlessControls` (`=== "markerless"`) — unchanged, strictly markerless-only.
+- `showMarkersPipelineControls` (`=== "markers"`) — unchanged.
+- `showCrossOnlyControls` — unchanged (markers + cross marker type).
+- `showFrameCornerControls` (`!== "markers"`) — NEW: the shared non-marker family (markerless +
+  per-frame) for stabilization, drift compensation, Frame Corners labels/slider/tooltips.
+- `isPerFrame` (`=== "per-frame"`) — NEW: drives the per-frame drop note and the
+  `per-frame-pipeline` body class.
+- Body classes: `markerless-pipeline` (unchanged) plus new `per-frame-pipeline`. `style.css`
+  extended the markerless flat-background viewport selectors to also match `per-frame-pipeline` (the
+  Frame Corners + preview viewports), preventing a checkerboard mismatch in per-frame mode. (Note:
+  `style.css` was not in the Phase 6 file list; this is a 2-line additive selector only.)
+
+*New i18n keys (added to ALL 13 locale tables; same locale set as Phase 4's `photo.dropNotePerFrame`)*
+- `alignment.pipelineOptions.perFrame` — the radio label (locale-translated in all 13 tables).
+- `tooltip.alignmentPipelinePerFrame` — the radio tooltip (locale-translated in all 13 tables),
+  plus a `TOOLTIP_SELECTOR_KEYS` entry `"#alignmentPipelinePerFrame": ["alignmentPipelinePerFrame",
+  "alignmentPipelineField"]`.
+- The per-frame drop note reuses the existing `photo.dropNotePerFrame` (added in Phase 4); no new
+  drop-note key was needed. `syncAlignmentPipelineLabels` now shows `photo.dropNotePerFrame` when
+  `isPerFrame`, else `photo.dropNote`.
+- Verified: `perFrame: "` appears 13×, `alignmentPipelinePerFrame` appears 14× (13 tooltip values +
+  1 selector key), `dropNotePerFrame` appears 13×.
+
+*Classification checklist — every `alignmentPipeline === "markerless"` / `!== "markerless"` site
+audited in `js/app.js` (line numbers approximate, post-edit).* Reclassification preserves
+byte-identical behavior for markers and markerless: for markerless, `!== "markers"` ≡ old
+`=== "markerless"` (true) and `=== "markers"` ≡ old `!== "markerless"` (false); only per-frame newly
+joins the non-marker branch.
+
+| Site | Function | Old guard | Classification | New guard |
+|------|----------|-----------|----------------|-----------|
+| ~1111 | inverted marker vision | `=== "markers"` | markers-only (untouched) | `=== "markers"` |
+| ~2100 | `applyManualMarkerOverrides` | `=== "markerless"` return | non-marker (skip in-place marker patch) | `!== "markers"` |
+| ~2405 | `beginStabilizationStrengthScrub` | `=== "markerless"` warmup | non-marker (stabilization shared) | `!== "markers"` |
+| ~3688 | `toggleMarkerlessPhaseDebug` | `!== "markerless"` return | **markerless-only** (phase debug) | unchanged |
+| ~3717 | `toggleMarkerlessWorkingImage` | `!== "markerless"` return | **markerless-only** (working-image debug) | unchanged |
+| ~3749 | `clearMarkerEdits` (`usesCornerNudges`) | `=== "markerless"` | non-marker (corner-nudge revert path) | `!== "markers"` |
+| ~3945 | `updateSliderReadouts` ROI estimate | `=== "markerless"` | non-marker (corner-tile estimate) | `!== "markers"` |
+| ~4355 | post-process stabilization warmup | `=== "markerless"` | non-marker (warm stabilization for per-frame) | `!== "markers"` |
+| ~4434 | `renderRectifiedPreview` working canvas | `=== "markerless"` | **markerless-only** (working-blur canvas) | unchanged |
+| ~4560 | grid-search-inset overlay | `=== "markerless"` | **markerless-only** (search-inset visual) | unchanged |
+| ~4603 | markerless phase-debug chart | `=== "markerless"` | **markerless-only** (phase debug viz) | unchanged |
+| ~4894 | `getPreviewFrameQuadForSourceIndex` | `=== "markerless"` | non-marker (corner-lattice extraction) | `!== "markers"` |
+| ~4980 | `resolveDisplayedAlignmentPoint` | `=== "markerless"` | non-marker (corner display model) | `!== "markers"` |
+| ~5655 | `getFrameExtractionAlignmentInfo` | `=== "markerless"` | non-marker (extraction lattice; phase=0 in per-frame) | `!== "markers"` |
+| ~6146 | `scheduleCurrentStabilizationWarmup` | `!== "markerless"` return | non-marker (stabilization shared) | `=== "markers"` |
+| ~6748 | `getMarkerlessPhaseSourceOffset` | `!== "markerless"` → {0,0} | **markerless-only** (per-frame has no phase sweep; returns 0) | unchanged |
+| ~6790 | `getMarkerlessVerticalDriftSourceOffset` | `!== "markerless"` → {0,0} | non-marker (Vertical Drift Compensation enabled) | `=== "markers"` |
+| ~6840 | `getMarkerlessCornerStabilizationOffset` | `!== "markerless"` → {0,0} | non-marker (stabilization + Frame Corners) | `=== "markers"` |
+| ~6903 | `getMarkerlessCornerManualNudge` | `!== "markerless"` → {0,0} | non-marker (Frame Corners overrides) | `=== "markers"` |
+| ~7156 | `getDisplayAlignmentInfo` early return | `!== "markerless" && !preview` | non-marker (markers-only short-circuit) | `=== "markers" && !preview` |
+| ~7164 | `getDisplayAlignmentInfo` marker post-rot branch | `!== "markerless"` | non-marker (markers-only marker preview; per-frame falls to corner builder) | `=== "markers"` |
+| ~7712 | `applyMarkerOverride` (`usesCornerNudges`) | `=== "markerless"` | non-marker (corner-nudge override semantics) | `!== "markers"` |
+| ~7781 | `restoreMarkerOverride` (`usesCornerNudges`) | `=== "markerless"` | non-marker (corner-nudge clear path) | `!== "markers"` |
+| (n/a) | `getPageBoundaryPreviewSignature` (~7211) | `config.alignmentPipeline` in cache key | passthrough (per-frame yields distinct signature naturally) | unchanged |
+| (n/a) | `syncAlignmentMarkerUi` working-image reset | `pipeline !== "markerless"` | **markerless-only** (resets working-image flag; correct for per-frame) | unchanged |
+
+*Visibility audit (`syncAlignmentPipelineVisibility`, label/slider/tooltip syncs)*
+- **Disabled in per-frame** (hidden): Grid Edge Threshold (`boundarySensitivityRow`) and Grid Edge
+  Run Length (`boundaryPersistenceRow`) changed `hidden = showMarkerlessControls` →
+  `hidden = !showMarkersPipelineControls` (marker-grid-only, so hidden in markerless AND per-frame);
+  marker-type field (`alignmentMarkerTypeField`, already markers-only); markerless gutter/phase
+  sliders (`markerlessPhaseXRow`/`markerlessPhaseYRow`, kept `!showMarkerlessControls`); the
+  Rectified Grid Pre/Post (`Rectified Grid` toggle) is not pipeline-radio-gated here — the marker
+  editor's blob view (`toggleMarkerBlobViewButton`) is already always hidden.
+- **Enabled in per-frame** (visible via `showFrameCornerControls`): stabilization method group +
+  enable + strength + lambda rows (Neighbor / Median both work); Vertical Drift Compensation row;
+  ROI-size slider position (`syncAlignmentSliderOrder`); Frame Corners override editor
+  (`toggleMarkerEditingButton`/`clearMarkerEditsButton` — not pipeline-gated, inherits markerless
+  behavior via the `usesCornerNudges` override sites above). `syncStabilizationMethodUi` lambda
+  gating moved to `showFrameCornerControls`.
+- **Labels/tooltips**: `syncAlignmentPipelineLabels` uses `showFrameCornerControls` for the Frame
+  Corners heading, the Centers/Stabilize viewer + mobile-control tab labels, and the ROI-size label
+  (so per-frame reads "Frame Corners"/"Centers"/"Stabilize", not marker wording);
+  `showMarkerlessControls` is still used only for the gutter-specific `summaryMarkerless` copy.
+  `syncAlignmentModeTooltips` now takes `showFrameCornerControls`. Drop note uses `isPerFrame ?
+  dropNotePerFrame : dropNote`.
+
+*Mobile checkpoint:* viewer tabs and mobile control tabs are always present (not pipeline-gated);
+only their text changes, now via `showFrameCornerControls`, so per-frame shows Centers/Stabilize on
+mobile single-viewer just like markerless. No viewer-tab visibility branch keys off pipeline mode, so
+all three pipelines work in mobile single-viewer mode.
+
+*Mat lifetime:* Phase 6 allocates no OpenCV Mats (UI-only). No `.delete()` changes.
+
+*Validation:* `node --check` passes on `js/app.js`, `js/ui-controls.js`, `js/dom-state.js`,
+`js/settings-defaults.js`, `js/i18n.js`. i18n key counts verified (see above). Markers/markerless
+conditionals confirmed byte-identical by the `markers`/`markerless` truth-table above.
+
+*Notes for Phases 7–9:*
+- (7) The strip should call `setActiveImage(index)` (Phase 5) on thumbnail click and re-derive the
+  active index after reorder/delete. Strip visibility can key off the `per-frame-pipeline` body class
+  or `isPerFrameModeActive()`. The strip belongs in the Photo group; nothing in Phase 6 reserved a
+  container, so Phase 7 adds its own (`#perFrameStripPanel`) and DOM refs.
+- (8) Settings load currently still routes `alignment_pipeline = per-frame` through
+  `settings-io.js`'s markers/markerless branch (lines ~147-151) — **left untouched on purpose**
+  (Phase 8 owns per-frame settings round-trip). When Phase 8 lands, that load branch must recognize
+  `per-frame` and set `dom.alignmentPipelinePerFrame.checked` + `state.runtime.forcePerFrameMode`
+  rather than falling back to markerless. Save side already emits `config.alignmentPipeline`
+  (`per-frame`) correctly.
+- (9) Per-frame's post-rotation live scrub preview is still markerless-gated (Phase 5 note); wiring a
+  per-frame scrub preview is later polish. No memory work was added here (Phase 9 owns the cell-size
+  ceiling and per-image cache trimming).
+
 ---
 
 ### Phase 7 — Image strip UI

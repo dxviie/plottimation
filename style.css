@@ -772,7 +772,9 @@ body.has-loaded-image .output-preview {
 }
 
 body.has-loaded-image.markerless-pipeline .viewer-card[data-view="preview"] .output-preview,
-body.has-loaded-image.markerless-pipeline .viewer-card[data-view="markers"] .cross-roi-viewport {
+body.has-loaded-image.markerless-pipeline .viewer-card[data-view="markers"] .cross-roi-viewport,
+body.has-loaded-image.per-frame-pipeline .viewer-card[data-view="preview"] .output-preview,
+body.has-loaded-image.per-frame-pipeline .viewer-card[data-view="markers"] .cross-roi-viewport {
   background-color: rgb(243, 244, 246);
   background-image: none;
 }

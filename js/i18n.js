@@ -87,6 +87,7 @@ const LOCALES = {
       pipelineOptions: {
         markerless: "Markerless (gutters, frames)",
         markers: "Markers (crosses, dots)",
+        perFrame: "Per-frame (one image per frame)",
       },
       stabilizationMethod: "Stabilization Method",
       stabilizationMethodOptions: {
@@ -249,6 +250,7 @@ const LOCALES = {
       alignmentPipelineField: "Choose between markerless frame estimation and marker-based alignment.",
       alignmentPipelineMarkerless: "Estimate frame divisions without registration marks by fitting a straight grid from image autocorrelation and gutter evidence.",
       alignmentPipelineMarkers: "Use registration markers between frames to refine the grid alignment.",
+      alignmentPipelinePerFrame: "Upload one image per animation frame; each is page-rectified and stacked into the animation. Drop several images at once to fill the frames.",
       stabilizationMethodField: "Choose which translation-only stabilization strategy is used in markerless mode.",
       stabilizationMethodPairwise: "Compare each frame with neighboring frames in the sheet or loop and solve one weighted global offset field.",
       stabilizationMethodAverage: "Compare each frame independently against one median reference frame built from the whole animation.",
@@ -458,6 +460,7 @@ const LOCALES = {
       pipelineOptions: {
         markerless: "Sin marcadores (canales, fotogramas)",
         markers: "Marcadores (cruces, puntos)",
+        perFrame: "Por fotograma (una imagen por fotograma)",
       },
       stabilizationMethod: "Método de estabilización",
       stabilizationMethodOptions: {
@@ -619,6 +622,7 @@ const LOCALES = {
       alignmentPipelineField: "Elige entre la estimación de fotogramas sin marcadores y la alineación basada en marcadores.",
       alignmentPipelineMarkerless: "Estima las divisiones de los fotogramas sin marcas de registro ajustando una cuadrícula recta a partir de la autocorrelación de la imagen y la evidencia de los canales.",
       alignmentPipelineMarkers: "Usa marcadores de registro entre fotogramas para refinar la alineación de la cuadrícula.",
+      alignmentPipelinePerFrame: "Sube una imagen por cada fotograma de la animación; cada una se rectifica y se apila en la animación. Suelta varias imágenes a la vez para llenar los fotogramas.",
       stabilizationMethodField: "Elige qué estrategia de estabilización solo por traslación se usa en el modo sin marcadores.",
       stabilizationMethodPairwise: "Compara cada fotograma con los fotogramas vecinos de la hoja o del bucle y resuelve un único campo global de desplazamientos ponderados.",
       stabilizationMethodAverage: "Compara cada fotograma de forma independiente con un fotograma de referencia mediano construido a partir de toda la animación.",
@@ -827,6 +831,7 @@ const LOCALES = {
       pipelineOptions: {
         markerless: "Senza marcatori (spazi, fotogrammi)",
         markers: "Marcatori (croci, punti)",
+        perFrame: "Per fotogramma (un'immagine per fotogramma)",
       },
       stabilizationMethod: "Metodo di stabilizzazione",
       stabilizationMethodOptions: {
@@ -988,6 +993,7 @@ const LOCALES = {
       alignmentPipelineField: "Scegli tra la stima dei fotogrammi senza marcatori e l’allineamento basato sui marcatori.",
       alignmentPipelineMarkerless: "Stima le divisioni dei fotogrammi senza segni di registro adattando una griglia diritta dall’autocorrelazione dell’immagine e dall’evidenza degli spazi vuoti.",
       alignmentPipelineMarkers: "Usa marcatori di registro tra i fotogrammi per rifinire l’allineamento della griglia.",
+      alignmentPipelinePerFrame: "Carica un'immagine per ogni fotogramma dell'animazione; ognuna viene rettificata e impilata nell'animazione. Trascina più immagini insieme per riempire i fotogrammi.",
       stabilizationMethodField: "Scegli quale strategia di stabilizzazione solo per traslazione usare in modalità senza marcatori.",
       stabilizationMethodPairwise: "Confronta ogni fotogramma con i fotogrammi vicini nel foglio o nel loop e risolve un unico campo globale di offset pesati.",
       stabilizationMethodAverage: "Confronta ogni fotogramma in modo indipendente con un fotogramma di riferimento mediano costruito dall'intera animazione.",
@@ -1196,6 +1202,7 @@ const LOCALES = {
       pipelineOptions: {
         markerless: "マーカーレス（ガター、フレーム）",
         markers: "マーカー使用（十字、点）",
+        perFrame: "フレームごと（1フレームに1枚）",
       },
       stabilizationMethod: "スタビライズ方式",
       stabilizationMethodOptions: {
@@ -1357,6 +1364,7 @@ const LOCALES = {
       alignmentPipelineField: "マーカーレスのフレーム推定と、マーカーを使う整列のどちらを使うか選びます。",
       alignmentPipelineMarkerless: "登録マークなしで、画像の自己相関とガターの手掛かりから直線的な格子を当てはめてフレーム境界を推定します。",
       alignmentPipelineMarkers: "フレーム間の登録マーカーを使って格子の整列を微調整します。",
+      alignmentPipelinePerFrame: "アニメの1フレームにつき1枚の画像をアップロードします。各画像はページ補正されてアニメに積み重ねられます。複数枚をまとめてドロップしてフレームを埋められます。",
       stabilizationMethodField: "マーカーレスモードで使う並進のみのスタビライズ手法を選びます。",
       stabilizationMethodPairwise: "各フレームをシート内またはループ内の近傍フレームと比較し、重み付きの全体オフセット場を解きます。",
       stabilizationMethodAverage: "各フレームを、アニメーション全体から作った中央値参照フレームと個別に比較します。",
@@ -1565,6 +1573,7 @@ const LOCALES = {
       pipelineOptions: {
         markerless: "无标记（空隙、帧）",
         markers: "标记（十字、圆点）",
+        perFrame: "逐帧（每帧一张图片）",
       },
       stabilizationMethod: "稳定化方法",
       stabilizationMethodOptions: {
@@ -1726,6 +1735,7 @@ const LOCALES = {
       alignmentPipelineField: "选择无标记帧估计或基于标记的对齐。",
       alignmentPipelineMarkerless: "不使用注册标记，而是根据图像自相关和空隙证据拟合直线网格来估计帧分割。",
       alignmentPipelineMarkers: "使用帧之间的注册标记来细化网格对齐。",
+      alignmentPipelinePerFrame: "为动画的每一帧上传一张图片；每张图片都会经过页面矫正并叠加成动画。可一次拖入多张图片来填充各帧。",
       stabilizationMethodField: "选择在无标记模式下使用哪种仅平移的稳定化策略。",
       stabilizationMethodPairwise: "将每一帧与纸面或循环中的邻近帧比较，并求解一个加权的全局偏移场。",
       stabilizationMethodAverage: "将每一帧独立地与由整段动画构建出的中值参考帧进行比较。",
@@ -1934,6 +1944,7 @@ const LOCALES = {
       pipelineOptions: {
         markerless: "無標記（空隙、影格）",
         markers: "標記（十字、圓點）",
+        perFrame: "逐格（每格一張圖片）",
       },
       stabilizationMethod: "穩定化方法",
       stabilizationMethodOptions: {
@@ -2095,6 +2106,7 @@ const LOCALES = {
       alignmentPipelineField: "選擇無標記影格估計或基於標記的對齊。",
       alignmentPipelineMarkerless: "不使用註冊標記，而是根據影像自相關與空隙證據擬合直線網格來估計影格分割。",
       alignmentPipelineMarkers: "使用影格之間的註冊標記來細化網格對齊。",
+      alignmentPipelinePerFrame: "為動畫的每一格上傳一張圖片；每張圖片都會經過頁面矯正並疊加成動畫。可一次拖入多張圖片來填滿各格。",
       stabilizationMethodField: "選擇在無標記模式下使用哪種僅平移的穩定化策略。",
       stabilizationMethodPairwise: "將每個影格與紙面或循環中的鄰近影格比較，並求解一個加權的全域偏移場。",
       stabilizationMethodAverage: "將每個影格獨立地與由整段動畫建立出的中值參考影格進行比較。",
@@ -2303,6 +2315,7 @@ const LOCALES = {
       pipelineOptions: {
         markerless: "마커 없음 (간격, 프레임)",
         markers: "마커 사용 (십자, 점)",
+        perFrame: "프레임별 (프레임당 이미지 한 장)",
       },
       stabilizationMethod: "안정화 방법",
       stabilizationMethodOptions: {
@@ -2464,6 +2477,7 @@ const LOCALES = {
       alignmentPipelineField: "마커 없는 프레임 추정과 마커 기반 정렬 중에서 선택합니다.",
       alignmentPipelineMarkerless: "등록 마크 없이 이미지 자기상관과 간격 단서를 바탕으로 직선 격자를 맞춰 프레임 경계를 추정합니다.",
       alignmentPipelineMarkers: "프레임 사이의 등록 마커를 사용해 격자 정렬을 세밀하게 맞춥니다.",
+      alignmentPipelinePerFrame: "애니메이션 프레임마다 이미지 한 장을 업로드합니다. 각 이미지는 페이지 보정 후 애니메이션으로 쌓입니다. 여러 장을 한 번에 드롭해 프레임을 채울 수 있습니다.",
       stabilizationMethodField: "마커 없는 모드에서 사용할 평행이동 전용 안정화 방식을 선택합니다.",
       stabilizationMethodPairwise: "각 프레임을 시트나 루프에서 이웃한 프레임과 비교하고 가중 전역 오프셋 필드를 풉니다.",
       stabilizationMethodAverage: "각 프레임을 전체 애니메이션으로 만든 중앙값 참조 프레임과 독립적으로 비교합니다.",
@@ -2672,6 +2686,7 @@ const LOCALES = {
       pipelineOptions: {
         markerless: "Sem marcadores (espaços, quadros)",
         markers: "Marcadores (cruzes, pontos)",
+        perFrame: "Por quadro (uma imagem por quadro)",
       },
       stabilizationMethod: "Método de estabilização",
       stabilizationMethodOptions: {
@@ -2833,6 +2848,7 @@ const LOCALES = {
       alignmentPipelineField: "Escolha entre a estimativa de quadros sem marcadores e o alinhamento baseado em marcadores.",
       alignmentPipelineMarkerless: "Estima as divisões dos quadros sem marcas de registro, ajustando uma grade reta a partir da autocorrelação da imagem e da evidência dos espaços vazios.",
       alignmentPipelineMarkers: "Usa marcadores de registro entre os quadros para refinar o alinhamento da grade.",
+      alignmentPipelinePerFrame: "Envie uma imagem por quadro da animação; cada uma é retificada e empilhada na animação. Solte várias imagens de uma vez para preencher os quadros.",
       stabilizationMethodField: "Escolha qual estratégia de estabilização apenas por translação será usada no modo sem marcadores.",
       stabilizationMethodPairwise: "Compara cada quadro com os quadros vizinhos na folha ou no loop e resolve um único campo global de deslocamentos ponderados.",
       stabilizationMethodAverage: "Compara cada quadro independentemente com um quadro de referência mediano construído a partir de toda a animação.",
@@ -3041,6 +3057,7 @@ const LOCALES = {
       pipelineOptions: {
         markerless: "Markerlos (Zwischenräume, Frames)",
         markers: "Marker (Kreuze, Punkte)",
+        perFrame: "Pro Bild (ein Bild pro Animationsbild)",
       },
       stabilizationMethod: "Stabilisierungsmethode",
       stabilizationMethodOptions: {
@@ -3202,6 +3219,7 @@ const LOCALES = {
       alignmentPipelineField: "Wählen Sie zwischen markerloser Frame-Schätzung und markerbasierter Ausrichtung.",
       alignmentPipelineMarkerless: "Schätzt Frame-Unterteilungen ohne Registrierungsmarken, indem aus Bildautokorrelation und Zwischenraum-Hinweisen ein gerades Raster angepasst wird.",
       alignmentPipelineMarkers: "Verwendet Registrierungsmarker zwischen den Frames, um die Rasterausrichtung zu verfeinern.",
+      alignmentPipelinePerFrame: "Lade ein Bild pro Animationsbild hoch; jedes wird seitenkorrigiert und zur Animation gestapelt. Mehrere Bilder auf einmal ablegen, um die Frames zu füllen.",
       stabilizationMethodField: "Wählen Sie, welche reine Translations-Stabilisierungsstrategie im markerlosen Modus verwendet wird.",
       stabilizationMethodPairwise: "Vergleicht jeden Frame mit benachbarten Frames im Blatt oder in der Schleife und löst ein gewichtetes globales Offset-Feld.",
       stabilizationMethodAverage: "Vergleicht jeden Frame unabhängig mit einem Median-Referenzframe, der aus der gesamten Animation gebildet wird.",
@@ -3410,6 +3428,7 @@ const LOCALES = {
       pipelineOptions: {
         markerless: "Bez znaczników (odstępy, klatki)",
         markers: "Znaczniki (krzyżyki, kropki)",
+        perFrame: "Na klatkę (jeden obraz na klatkę)",
       },
       stabilizationMethod: "Metoda stabilizacji",
       stabilizationMethodOptions: {
@@ -3571,6 +3590,7 @@ const LOCALES = {
       alignmentPipelineField: "Wybierz między bezznacznikowym szacowaniem klatek a wyrównaniem opartym na znacznikach.",
       alignmentPipelineMarkerless: "Szacuje podziały klatek bez znaków rejestracyjnych, dopasowując prostą siatkę na podstawie autokorelacji obrazu i sygnałów z odstępów.",
       alignmentPipelineMarkers: "Używa znaczników rejestracyjnych między klatkami do doprecyzowania wyrównania siatki.",
+      alignmentPipelinePerFrame: "Prześlij jeden obraz na każdą klatkę animacji; każdy zostaje wyprostowany i ułożony w animację. Upuść kilka obrazów naraz, aby wypełnić klatki.",
       stabilizationMethodField: "Wybierz, która strategia stabilizacji oparta wyłącznie na przesunięciu ma być używana w trybie bez znaczników.",
       stabilizationMethodPairwise: "Porównuje każdą klatkę z sąsiednimi klatkami na arkuszu lub w pętli i wyznacza jedno ważone globalne pole przesunięć.",
       stabilizationMethodAverage: "Porównuje każdą klatkę niezależnie z medianową klatką odniesienia zbudowaną z całej animacji.",
@@ -3779,6 +3799,7 @@ const LOCALES = {
       pipelineOptions: {
         markerless: "Uten markører (mellomrom, ruter)",
         markers: "Markører (kryss, prikker)",
+        perFrame: "Per rute (ett bilde per rute)",
       },
       stabilizationMethod: "Stabiliseringsmetode",
       stabilizationMethodOptions: {
@@ -3940,6 +3961,7 @@ const LOCALES = {
       alignmentPipelineField: "Velg mellom markørløs ruteberegning og markørbasert justering.",
       alignmentPipelineMarkerless: "Estimerer ruteinndelingen uten registreringsmerker ved å tilpasse et rett rutenett fra bildeautokorrelasjon og tegn på tomme mellomrom.",
       alignmentPipelineMarkers: "Bruker registreringsmarkører mellom rutene for å finjustere rutenettjusteringen.",
+      alignmentPipelinePerFrame: "Last opp ett bilde per animasjonsrute; hvert bilde sidekorrigeres og stables til animasjonen. Slipp flere bilder samtidig for å fylle rutene.",
       stabilizationMethodField: "Velg hvilken stabiliseringsstrategi som kun bruker translasjon i markørløs modus.",
       stabilizationMethodPairwise: "Sammenligner hver rute med nabobildene i arket eller løkken og løser ett vektet globalt forskyvningsfelt.",
       stabilizationMethodAverage: "Sammenligner hver rute uavhengig med en medianreferanserute bygget fra hele animasjonen.",
@@ -4148,6 +4170,7 @@ const LOCALES = {
       pipelineOptions: {
         markerless: "Без міток (проміжки, кадри)",
         markers: "Мітки (хрестики, точки)",
+        perFrame: "Покадрово (одне зображення на кадр)",
       },
       stabilizationMethod: "Метод стабілізації",
       stabilizationMethodOptions: {
@@ -4309,6 +4332,7 @@ const LOCALES = {
       alignmentPipelineField: "Виберіть між безмітковим оцінюванням кадрів і вирівнюванням на основі міток.",
       alignmentPipelineMarkerless: "Оцінює поділ кадрів без реєстраційних міток, підганяючи пряму сітку за автокореляцією зображення та ознаками порожніх проміжків.",
       alignmentPipelineMarkers: "Використовує реєстраційні мітки між кадрами для уточнення вирівнювання сітки.",
+      alignmentPipelinePerFrame: "Завантажте по одному зображенню на кадр анімації; кожне вирівнюється за сторінкою та складається в анімацію. Перетягніть кілька зображень одразу, щоб заповнити кадри.",
       stabilizationMethodField: "Виберіть, яку стратегію стабілізації лише за зсувом використовувати в режимі без міток.",
       stabilizationMethodPairwise: "Порівнює кожен кадр із сусідніми кадрами на аркуші або в циклі та розв’язує одне зважене глобальне поле зміщень.",
       stabilizationMethodAverage: "Порівнює кожен кадр окремо з медіанним опорним кадром, побудованим з усієї анімації.",
@@ -4517,6 +4541,7 @@ const LOCALES = {
       pipelineOptions: {
         markerless: "Sans repères (gouttières, images)",
         markers: "Repères (croix, points)",
+        perFrame: "Par image (une image par image d’animation)",
       },
       stabilizationMethod: "Méthode de stabilisation",
       stabilizationMethodOptions: {
@@ -4678,6 +4703,7 @@ const LOCALES = {
       alignmentPipelineField: "Choisissez entre l’estimation des images sans repères et l’alignement basé sur des repères.",
       alignmentPipelineMarkerless: "Estime les divisions d’images sans marques de repérage en ajustant une grille droite à partir de l’autocorrélation de l’image et des indices de gouttières.",
       alignmentPipelineMarkers: "Utilise des repères de registration entre les images pour affiner l’alignement de la grille.",
+      alignmentPipelinePerFrame: "Importez une image par image d’animation ; chacune est redressée puis empilée dans l’animation. Déposez plusieurs images à la fois pour remplir les images.",
       stabilizationMethodField: "Choisissez quelle stratégie de stabilisation uniquement par translation utiliser en mode sans repères.",
       stabilizationMethodPairwise: "Compare chaque image aux images voisines sur la feuille ou dans la boucle et résout un unique champ global de décalages pondérés.",
       stabilizationMethodAverage: "Compare chaque image indépendamment à une image de référence médiane construite à partir de l’ensemble de l’animation.",
@@ -4926,6 +4952,7 @@ const TOOLTIP_SELECTOR_KEYS = {
   "#alignmentPipelineField": "alignmentPipelineField",
   "#alignmentPipelineMarkerless": ["alignmentPipelineMarkerless", "alignmentPipelineField"],
   "#alignmentPipelineMarkers": ["alignmentPipelineMarkers", "alignmentPipelineField"],
+  "#alignmentPipelinePerFrame": ["alignmentPipelinePerFrame", "alignmentPipelineField"],
   "#stabilizationMethodField": "stabilizationMethodField",
   "#stabilizationMethodPairwise": ["stabilizationMethodPairwise", "stabilizationMethodField"],
   "#stabilizationMethodAverage": ["stabilizationMethodAverage", "stabilizationMethodField"],
