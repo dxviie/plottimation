@@ -1,5 +1,5 @@
 source_filename	2026-06-12 10-05-02.jpeg
-source_credit	
+source_credit	Per-frame demo by @dxviie (@d17e.dev)
 paper_preset	square
 paper_orientation	landscape
 paper_width	12
