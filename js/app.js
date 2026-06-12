@@ -222,7 +222,85 @@ function maybeLoadStartupDemoFromUrl(manifestFilenames) {
   if (dom.loadDemoSelect) {
     dom.loadDemoSelect.value = requestedDemo;
   }
-  void loadImageSource(`demo/${requestedDemo}`, requestedDemo);
+  void loadSelectedDemo(requestedDemo);
+}
+
+/**
+ * Guess an image MIME type from a filename extension.
+ *
+ * @param {string} filename
+ * @returns {string}
+ */
+function guessImageMimeType(filename) {
+  const lower = String(filename || "").toLowerCase();
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".gif")) return "image/gif";
+  return "image/jpeg";
+}
+
+/**
+ * Load one bundled demo entry from `demo/index.json`.
+ *
+ * Single-image demos load `demo/<filename>` with a sibling settings file. Folder demos (for example
+ * `11_per_frame`) load every image listed in `demo/<id>/manifest.json` together with that folder's
+ * settings file.
+ *
+ * @param {string} demoId
+ * @returns {Promise<void>}
+ */
+async function loadSelectedDemo(demoId) {
+  const folderManifestUrl = `demo/${demoId}/manifest.json`;
+  try {
+    const response = await fetch(folderManifestUrl, { cache: "no-store" });
+    if (response.ok) {
+      const manifest = await response.json();
+      if (manifest?.type === "per-frame" && Array.isArray(manifest.images) && manifest.images.length > 0) {
+        await loadPerFrameFolderDemo(demoId, manifest);
+        return;
+      }
+    }
+  } catch {
+    // Fall through to the single-image demo path.
+  }
+  await loadImageSource(`demo/${demoId}`, demoId);
+}
+
+/**
+ * Load a bundled per-frame demo folder: all manifest images plus the folder settings file.
+ *
+ * @param {string} demoId
+ * @param {{ settings?: string, images: string[] }} manifest
+ * @returns {Promise<void>}
+ */
+async function loadPerFrameFolderDemo(demoId, manifest) {
+  const baseUrl = new URL(`demo/${demoId}/`, globalThis.location?.href || window.location.href);
+  const settingsName = manifest.settings || `${demoId}_settings.txt`;
+  let companionSettingsText = "";
+  try {
+    const settingsResponse = await fetch(new URL(settingsName, baseUrl).toString(), { cache: "no-store" });
+    if (settingsResponse.ok) {
+      companionSettingsText = await settingsResponse.text();
+    }
+  } catch {
+    /* settings are optional */
+  }
+  const imageNames = manifest.images.filter((name) => typeof name === "string" && name.trim());
+  const [firstImageName, ...restImageNames] = imageNames;
+  if (!firstImageName) return;
+  const additionalImageSources = restImageNames.map((name) => ({
+    src: new URL(name, baseUrl).toString(),
+    filename: name,
+    mimeType: guessImageMimeType(name),
+  }));
+  await loadImageSource(
+    new URL(firstImageName, baseUrl).toString(),
+    firstImageName,
+    guessImageMimeType(firstImageName),
+    null,
+    [],
+    { companionSettingsText, additionalImageSources, demoId },
+  );
 }
 
 /**
@@ -232,13 +310,15 @@ function maybeLoadStartupDemoFromUrl(manifestFilenames) {
  * continuing to advertise the old demo after the user switches to another file or demo.
  *
  * @param {string} nextFilename
+ * @param {string} [demoId=""]
  * @returns {void}
  */
-function clearDemoQueryIfLoadingDifferentFile(nextFilename) {
+function clearDemoQueryIfLoadingDifferentFile(nextFilename, demoId = "") {
   const url = new URL(globalThis.location?.href || "", globalThis.location?.href || window.location.href);
   const currentDemo = String(url.searchParams.get("demo") || "").trim();
   if (!currentDemo) return;
-  if (currentDemo === String(nextFilename || "").trim()) return;
+  const nextDemoId = String(demoId || "").trim();
+  if (currentDemo === nextDemoId || currentDemo === String(nextFilename || "").trim()) return;
   url.searchParams.delete("demo");
   history.replaceState(null, "", url.toString());
   if (dom.loadDemoSelect) {
@@ -1932,7 +2012,7 @@ function attachUi() {
     makeLivePreviewDragCue,
     makeGifImageDraggable,
     handleFile,
-    loadSelectedDemo: (filename) => { void loadImageSource(`demo/${filename}`, filename); },
+    loadSelectedDemo: (filename) => { void loadSelectedDemo(filename); },
     renderRectifiedPreview,
     resetAppearanceControls,
     resetTrimControls,
@@ -2849,16 +2929,30 @@ async function handleFile(file, files = null) {
  * @param {string} [mimeType="image/jpeg"]
  * @param {File | null} [settingsFile=null]
  * @param {File[]} [additionalImageFiles=[]] Extra images beyond the primary, loaded as per-frame entries.
+ * @param {{
+ *   companionSettingsText?: string | null,
+ *   additionalImageSources?: { src: string, filename?: string, mimeType?: string }[],
+ *   demoId?: string,
+ * }} [options={}]
  * @returns {Promise<void>}
  */
-async function loadImageSource(src, filename = "", mimeType = "image/jpeg", settingsFile = null, additionalImageFiles = []) {
-  clearDemoQueryIfLoadingDifferentFile(filename);
+async function loadImageSource(
+  src,
+  filename = "",
+  mimeType = "image/jpeg",
+  settingsFile = null,
+  additionalImageFiles = [],
+  options = {},
+) {
+  clearDemoQueryIfLoadingDifferentFile(filename, options.demoId || "");
   await loadImageSourceViaController({
     src,
     filename,
     mimeType,
     settingsFile,
     additionalImageFiles,
+    additionalImageSources: options.additionalImageSources || [],
+    companionSettingsText: options.companionSettingsText ?? null,
     dom,
     state,
     setStatus,

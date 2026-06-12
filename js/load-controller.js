@@ -183,6 +183,8 @@ export async function handleFile(file, files = null, { state, loadImageSource, a
  *   mimeType?: string,
  *   settingsFile?: File | null,
  *   additionalImageFiles?: File[],
+ *   additionalImageSources?: { src: string, filename?: string, mimeType?: string }[],
+ *   companionSettingsText?: string | null,
  *   dom: import("./dom-state.js").dom,
  *   state: import("./dom-state.js").state,
  *   setStatus: (text:string) => void,
@@ -211,6 +213,8 @@ export async function loadImageSource({
   mimeType = "image/jpeg",
   settingsFile = null,
   additionalImageFiles = [],
+  additionalImageSources = [],
+  companionSettingsText = null,
   dom,
   state,
   setStatus,
@@ -258,7 +262,10 @@ export async function loadImageSource({
   syncRawPhotoCreditDisplay?.();
   clearAllPreviews();
   // The UI resets to defaults first, then an optional sibling settings file is layered on top.
-  const settingsText = await loadCompanionSettingsText(src, filename, settingsFile);
+  const settingsText =
+    companionSettingsText != null
+      ? companionSettingsText
+      : await loadCompanionSettingsText(src, filename, settingsFile);
 
   const image = new Image();
   image.onload = async () => {
@@ -313,6 +320,28 @@ export async function loadImageSource({
             mimeType: extraFile.type || "image/jpeg",
             ownedObjectUrl: extraUrl,
             dragUrl: extraUrl,
+            canvas: extraCanvas,
+          }),
+        );
+      }
+      // URL-based extras (bundled per-frame demos) decode directly without creating blob URLs.
+      for (const extraSource of additionalImageSources) {
+        if (!extraSource?.src) continue;
+        let extraImage;
+        try {
+          extraImage = await decodeImageElement(extraSource.src);
+        } catch {
+          continue;
+        }
+        const extraCanvas = document.createElement("canvas");
+        drawImageToCanvas(extraImage, extraCanvas);
+        entries.push(
+          createSourceImageEntry({
+            image: extraImage,
+            filename: extraSource.filename || "",
+            mimeType: extraSource.mimeType || "image/jpeg",
+            ownedObjectUrl: "",
+            dragUrl: extraSource.src,
             canvas: extraCanvas,
           }),
         );

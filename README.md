@@ -19,7 +19,8 @@ Version 1.17 • By @GolanLevin, Spring 2026.
 1. **Create** a "frame sheet" of your animation. You can work in either of two ways:
    - **With Markers.** Make a marker-based sheet, with frames separated by small crosses (`+`) or filled circular dots (`●`), rendered in a high-contrast ink. [Here's a p5.js sketch](https://editor.p5js.org/golan/sketches/_ZMbagYFc) to get started. Using markers gives the most accurate frame alignment.<br/><img src="doc/marker-page-examples.png" width="400">
    - **Or, Without Markers.** Create a markerless sheet, with frames separated by empty gutters. *Note:* depending on your design, the markerless pipeline may produce more jittery animations.<br/><img src="doc/markerless-page-example.png" height="131">
-2. **Photograph or scan** your frame sheet. It's OK to use a casual photo, but your page must have good contrast against a plain background. For example, a light-colored sheet should be completely surrounded by a uniform dark background, as shown [here](demo/1_dmawer_crosses.jpg) and below. It is *strongly recommended* to keep the resolution of your frame sheet under 8000×8000 pixels.<br/><img src="doc/page-photo-recommendations.png">
+   - **Or, Per-Frame.** Upload a sequence of individual images — one photo or scan per animation frame — instead of a single contact-sheet photo. Drop several images at once, or choose `Per-Frame (one image per frame)` under `Alignment Pipeline`. The bundled `11_per_frame` demo in the Load Demo menu shows this workflow with 24 separate photos.
+2. **Photograph or scan** your frame sheet (or collect one image per frame for per-frame mode). It's OK to use a casual photo, but your page must have good contrast against a plain background. For example, a light-colored sheet should be completely surrounded by a uniform dark background, as shown [here](demo/1_dmawer_crosses.jpg) and below. It is *strongly recommended* to keep the resolution of your frame sheet under 8000×8000 pixels.<br/><img src="doc/page-photo-recommendations.png">
 3. **Open** the [**Plottimation Tool**](https://golanlevin.github.io/plottimation/) in a browser, from [**here**](https://golanlevin.github.io/plottimation).
 4. **Load** the image of your frame sheet into the Plottimation Tool. You can do this by dragging your image file onto the Tool's load target (where it says "Drop a photo or scan here"), or by clicking the target to load a file.
 5. Under the *Layout* tab, **set** `Frame Columns` and `Frame Rows` to match the layout of your sheet's grid of frames. You should also set your sheet's orientation (landscape or portrait) and page size (11×8.5, etc.).
@@ -77,6 +78,9 @@ Version 1.17 • By @GolanLevin, Spring 2026.
 ![Cyanotype by Kelli Anderson (@kellianderson)](doc/10_cyano_kellianderson.gif)
 [![10_cyano_kellianderson_i.png](doc/10_cyano_kellianderson_i.png)](demo/10_cyano_kellianderson.png)
 <br>Cyanotype by Kelli Anderson ([@kellianderson](https://www.instagram.com/kellianderson/)) 
+
+[![11_per_frame first frame](demo/11_per_frame/2026-06-12%2010-05-02%20Medium.jpeg)](https://golanlevin.github.io/plottimation/?demo=11_per_frame)
+<br>Per-frame mode demo — 24 individual photos assembled with the `Per-Frame` alignment pipeline ([load demo](https://golanlevin.github.io/plottimation/?demo=11_per_frame))
 
 <!-- 
 
