@@ -20,6 +20,7 @@ import {
   updateExportButtonLabel as updateExportButtonLabelViaController,
   revokeGifUrl as revokeGifUrlViaController,
   sanitizeFilenameBase,
+  detectMp4ExportSupport,
   exportGif as exportGifViaController,
   exportMp4 as exportMp4ViaController,
   exportZip as exportZipViaController,
@@ -126,36 +127,6 @@ function mapEncodingQualityToGifEncoderQuality(encodingQuality) {
   const clamped = Math.max(1, Math.min(100, encodingQuality));
   const normalized = (clamped - 1) / 99;
   return Math.max(1, Math.min(20, Math.round(20 - (normalized * 19))));
-}
-
-/**
- * Probe whether this browser can encode H.264 frames with WebCodecs for later MP4 muxing.
- *
- * @returns {Promise<{supported:boolean, codec:string}>}
- */
-async function detectMp4ExportSupport() {
-  if (typeof globalThis.VideoEncoder === "undefined" || typeof VideoEncoder.isConfigSupported !== "function") {
-    return { supported: false, codec: "" };
-  }
-  const candidates = ["avc1.42001f", "avc1.42E01E", "avc1.4D401E"];
-  for (const codec of candidates) {
-    try {
-      const support = await VideoEncoder.isConfigSupported({
-        codec,
-        width: 16,
-        height: 16,
-        bitrate: 500_000,
-        framerate: 20,
-        avc: { format: "avc" },
-      });
-      if (support?.supported) {
-        return { supported: true, codec };
-      }
-    } catch {
-      // Try the next H.264 profile string.
-    }
-  }
-  return { supported: false, codec: "" };
 }
 
 /**
