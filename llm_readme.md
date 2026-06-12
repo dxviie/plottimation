@@ -54,8 +54,9 @@ frame-sheet photo. Image count equals frame count (treated internally as a flat 
 - each uploaded image is page-rectified independently via `rectifySinglePage` (called with a per-image
   config copy aliased to `"markerless"`, carrying that image's `manualPageContour` and `postRotationDeg`)
 - the rectified pages are resized to a single common cell size (median rectified dimensions, clamped
-  per-dimension and held to the same total-area memory ceiling as the single-page rectified path) and
-  stacked into a synthetic 1×N composite `baseRectifiedMat`
+  uniformly by long edge so the Layout paper aspect survives, and held to the same total-area memory
+  ceiling as the single-page rectified path) and stacked into a synthetic 1×N composite
+  `baseRectifiedMat`
 - synthetic corner intersections are emitted into the same `markerLookup` structure (via
   `buildUnrefinedCrossRegionInfo`), so downstream extraction/stabilization/ordering/export run unchanged
 - per-image page-corner and post-rotation overrides are post-load, pre-rectification edits on the
@@ -304,6 +305,16 @@ Overlays currently include:
 - green current-frame quad
 - green connected edge preview while actively editing a marker/corner override
 - red omitted-frame quads with a translucent gray fill and diagonal slash
+
+## Page Detection Border-Quad Rescue
+
+When full-resolution page detection selects (near-)the whole image as the largest quad,
+`pipeline.js → refineBorderPageQuadWithDownscaledDetection` retries detection on a 512px downscale.
+The retry first reuses the user's threshold method/offset; if that still yields a border quad it
+tries Otsu candidates (`otsu` at the user offset, then `otsu` at offset 0), which handle bright
+backgrounds that the default `offset-peak` threshold merges with the paper. A rescue quad is only
+accepted when it is a substantial interior quad (≥10% area, not near the image border), so genuine
+scanner-style full-bleed inputs still fall through to the source-boundary page.
 
 ## Page Detection Threshold Preview
 

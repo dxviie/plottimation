@@ -88,9 +88,10 @@
   order plus the image count. Settings files carry no image data, so restoring a saved per-frame
   project requires re-uploading the same images in the same order; overrides reattach by upload
   order, not by filename.
-- The per-frame composite cell size is clamped per-dimension and held to the same total-area memory
-  ceiling the single-page rectified path uses; if the median cell size would exceed it, `cellW`/`cellH`
-  are scaled down uniformly so the composite Mat cannot blow up on large inputs.
+- The per-frame composite cell size is clamped by long edge (uniformly, so the rectified-page /
+ Layout paper aspect ratio is preserved) and held to the same total-area memory ceiling the
+ single-page rectified path uses; if the median cell size would exceed either bound, `cellW`/`cellH`
+ are scaled down uniformly so the composite Mat cannot blow up on large inputs.
 
 ## Markerless Notes
 - Markerless pitch estimation comes from grayscale blurred autocorrelation.

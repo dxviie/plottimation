@@ -491,17 +491,18 @@ function runPerFramePipeline(images, config, requestId, throwIfAborted) {
     }
     throwIfAborted(requestId);
 
-    // 4. Pick a single common cell size from the median rectified dimensions, clamped per-dimension so
-    // one oversized page cannot blow up the composite Mat.
+    // 4. Pick a single common cell size from the median rectified dimensions. The per-dimension cap
+    // is applied as a UNIFORM long-edge scale so the rectified-page aspect ratio (which carries the
+    // Layout paper aspect) survives; clamping width and height independently would square off any
+    // cell whose both dimensions exceed the cap and squish the frames.
     const frameCount = cellStyledMats.length;
     const widths = cellStyledMats.map((mat) => mat.cols);
     const heights = cellStyledMats.map((mat) => mat.rows);
-    let cellW = Math.round(
-      Math.max(PER_FRAME_MIN_CELL_PX, Math.min(PER_FRAME_MAX_CELL_PX, computeMedian(widths)))
-    );
-    let cellH = Math.round(
-      Math.max(PER_FRAME_MIN_CELL_PX, Math.min(PER_FRAME_MAX_CELL_PX, computeMedian(heights)))
-    );
+    let cellW = Math.max(1, Math.round(computeMedian(widths)));
+    let cellH = Math.max(1, Math.round(computeMedian(heights)));
+    const longEdgeScale = Math.min(1, PER_FRAME_MAX_CELL_PX / Math.max(cellW, cellH));
+    cellW = Math.max(PER_FRAME_MIN_CELL_PX, Math.round(cellW * longEdgeScale));
+    cellH = Math.max(PER_FRAME_MIN_CELL_PX, Math.round(cellH * longEdgeScale));
     // Strict composite-area ceiling: the whole stacked sheet (cellW × N × cellH) must fit the same
     // memory budget the single-page path uses (RECTIFIED_PREVIEW_LONG_EDGE_PX²). If the median cells
     // would exceed it, scale cellW and cellH down UNIFORMLY so the cell aspect ratio is preserved.
@@ -1173,6 +1174,12 @@ function makeManualPageQuad(points, sourceWidth, sourceHeight) {
  * detection on a small image. The low-res pass matches the live slider preview and is less prone to
  * choosing a one-pixel-connected image border when the paper/background tones are close.
  *
+ * The downscaled retry first reuses the user's threshold settings; if that still selects the image
+ * border (common when a bright background merges with the paper under the default offset-peak
+ * threshold), it falls back to Otsu candidates, which separate paper from a uniformly bright
+ * surface much more reliably. A rescue quad is only accepted when it is a substantial interior
+ * quad, so the user's threshold settings stay authoritative whenever they produce a real page.
+ *
  * This fallback is intentionally narrow: scanner-like inputs can still use the source boundary as
  * the page when the downscaled pass does not find a substantial interior quad.
  *
@@ -1211,24 +1218,37 @@ function refineBorderPageQuadWithDownscaledDetection(
       0,
       cv.INTER_AREA
     );
-    applyPaperThreshold(previewGray, previewThresh, thresholdMethod, thresholdOffset);
-    const previewQuad = findLargestQuad(previewThresh, previewWidth * previewHeight);
-    if (isNearSourceBorderQuad(previewQuad.points, previewWidth, previewHeight)) return pageQuad;
-    if (previewQuad.areaPct < BORDER_QUAD_REFINEMENT_MIN_AREA_PCT) return pageQuad;
+    // Candidate threshold settings, tried in order until one yields a substantial interior quad.
+    // The user's own settings come first so explicit slider choices keep priority.
+    const thresholdCandidates = [
+      { method: thresholdMethod, offset: thresholdOffset },
+      { method: "otsu", offset: thresholdOffset },
+      { method: "otsu", offset: 0 },
+    ];
+    for (const candidate of thresholdCandidates) {
+      let previewQuad = null;
+      try {
+        applyPaperThreshold(previewGray, previewThresh, candidate.method, candidate.offset);
+        previewQuad = findLargestQuad(previewThresh, previewWidth * previewHeight);
+      } catch {
+        continue;
+      }
+      if (isNearSourceBorderQuad(previewQuad.points, previewWidth, previewHeight)) continue;
+      if (previewQuad.areaPct < BORDER_QUAD_REFINEMENT_MIN_AREA_PCT) continue;
 
-    const scaledPoints = previewQuad.points.map((point) => ({
-      x: point.x / scale,
-      y: point.y / scale,
-    }));
-    const scaledContourArea = previewQuad.areaPx / (scale * scale);
-    const scaledQuadArea = getPolygonArea(scaledPoints);
-    return {
-      points: scaledPoints,
-      areaPx: scaledContourArea,
-      quadAreaPx: scaledQuadArea,
-      areaPct: scaledContourArea / Math.max(1, sourceWidth * sourceHeight),
-    };
-  } catch {
+      const scaledPoints = previewQuad.points.map((point) => ({
+        x: point.x / scale,
+        y: point.y / scale,
+      }));
+      const scaledContourArea = previewQuad.areaPx / (scale * scale);
+      const scaledQuadArea = getPolygonArea(scaledPoints);
+      return {
+        points: scaledPoints,
+        areaPx: scaledContourArea,
+        quadAreaPx: scaledQuadArea,
+        areaPct: scaledContourArea / Math.max(1, sourceWidth * sourceHeight),
+      };
+    }
     return pageQuad;
   } finally {
     previewGray.delete();
