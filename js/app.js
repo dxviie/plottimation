@@ -2198,11 +2198,7 @@ function resetTrimControls() {
  */
 function resetExportControls() {
   const previousOutputSize = getRequestedOutputSize();
-  const maxFrameCount = Math.max(
-    1,
-    Math.max(1, Math.round(Number(dom.frameCols.value) || SETTINGS_DEFAULTS.layout.frameCols)) *
-    Math.max(1, Math.round(Number(dom.frameRows.value) || SETTINGS_DEFAULTS.layout.frameRows))
-  );
+  const maxFrameCount = getFrameExportCountMax();
   const alreadyReset =
     (Number(dom.fps.value) || SETTINGS_DEFAULTS.gifExport.fps) === SETTINGS_DEFAULTS.gifExport.fps &&
     (Number(dom.loopCount.value) || SETTINGS_DEFAULTS.gifExport.loopCount) === SETTINGS_DEFAULTS.gifExport.loopCount &&
@@ -2977,6 +2973,7 @@ async function addPerFrameImages(files) {
   }
   syncAlignmentMarkerUi();
   renderPerFrameStrip();
+  updateSliderReadouts();
   scheduleProcess(0);
 }
 
@@ -2992,6 +2989,25 @@ async function addPerFrameImages(files) {
  */
 function isPerFrameModeActive() {
   return !!dom.alignmentPipelinePerFrame?.checked || !!state.runtime.forcePerFrameMode;
+}
+
+/**
+ * Upper bound for the `Frames in Export` control and the export-options clamp.
+ *
+ * Grid pipelines cap at Frame Columns × Frame Rows. Per-frame mode caps at the number of uploaded
+ * images (or extracted frames once processing has run).
+ *
+ * @returns {number}
+ */
+function getFrameExportCountMax() {
+  if (isPerFrameModeActive()) {
+    const imageCount = Array.isArray(state.source.images) ? state.source.images.length : 0;
+    const frameBudget = imageCount > 0 ? imageCount : Math.max(0, state.geometry.frameCount || 0);
+    return Math.max(1, frameBudget);
+  }
+  const cols = Math.max(1, Math.min(20, Math.round(Number(dom.frameCols.value) || SETTINGS_DEFAULTS.layout.frameCols)));
+  const rows = Math.max(1, Math.min(20, Math.round(Number(dom.frameRows.value) || SETTINGS_DEFAULTS.layout.frameRows)));
+  return Math.max(1, cols * rows);
 }
 
 /**
@@ -3062,7 +3078,7 @@ function readConfig() {
   const paperAspect = clampPaperAspect(paperWidth, paperHeight);
   const frameCols = Math.max(1, Math.min(20, Math.round(Number(dom.frameCols.value) || SETTINGS_DEFAULTS.layout.frameCols)));
   const frameRows = Math.max(1, Math.min(20, Math.round(Number(dom.frameRows.value) || SETTINGS_DEFAULTS.layout.frameRows)));
-  const sourceFrameCount = Math.max(1, frameCols * frameRows);
+  const sourceFrameCount = getFrameExportCountMax();
   // Per-frame mode is selected by its own radio (added in Phase 6) or, until then, by a dev flag so
   // the pipeline can be exercised before the UI exists. See isPerFrameModeActive for details.
   const perFrameModeActive = isPerFrameModeActive();
@@ -3919,9 +3935,7 @@ function updateSliderReadouts() {
   if (!frameCountFieldFocused) {
     syncFrameCountToExportUi();
   } else if (dom.frameCountToExport) {
-    const cols = Math.max(1, Math.min(20, Math.round(Number(dom.frameCols.value) || SETTINGS_DEFAULTS.layout.frameCols)));
-    const rows = Math.max(1, Math.min(20, Math.round(Number(dom.frameRows.value) || SETTINGS_DEFAULTS.layout.frameRows)));
-    const maxFrameCount = Math.max(1, cols * rows);
+    const maxFrameCount = getFrameExportCountMax();
     dom.frameCountToExport.min = "1";
     dom.frameCountToExport.max = String(maxFrameCount);
     state.runtime.lastFrameExportCountMax = maxFrameCount;
@@ -4024,19 +4038,18 @@ function updateSliderReadouts() {
 }
 
 /**
- * Clamp the export-frame-count control to the current grid size. If the control was still at the
- * previous maximum, treat it as "use all cells" and advance it to the new maximum automatically.
+ * Clamp the export-frame-count control to the current source budget (grid cells or per-frame images).
+ * If the control was still at the previous maximum, treat it as "use all frames" and advance it to
+ * the new maximum automatically.
  *
  * This also covers legacy settings files that predate `Frames in Export`: an empty field is
- * interpreted as "export the whole grid", not as a literal zero or one-frame request.
+ * interpreted as "export every available frame", not as a literal zero or one-frame request.
  *
  * @returns {number}
  */
 function syncFrameCountToExportUi() {
   if (!dom.frameCountToExport) return 0;
-  const cols = Math.max(1, Math.min(20, Math.round(Number(dom.frameCols.value) || SETTINGS_DEFAULTS.layout.frameCols)));
-  const rows = Math.max(1, Math.min(20, Math.round(Number(dom.frameRows.value) || SETTINGS_DEFAULTS.layout.frameRows)));
-  const maxFrameCount = Math.max(1, cols * rows);
+  const maxFrameCount = getFrameExportCountMax();
   const previousMax = Math.max(1, state.runtime.lastFrameExportCountMax || maxFrameCount);
   const rawText = String(dom.frameCountToExport.value || "").trim();
   const rawValue = Number(rawText);

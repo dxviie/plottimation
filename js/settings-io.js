@@ -265,14 +265,6 @@ export function applyLoadedSettingsText({
   }
   syncPageCornerEditingUi?.();
   syncRawPhotoCreditDisplay?.();
-  if (dom.frameCountToExport) {
-    const cols = Math.max(1, Math.min(20, Math.round(Number(dom.frameCols.value) || settingsDefaults.layout.frameCols)));
-    const rows = Math.max(1, Math.min(20, Math.round(Number(dom.frameRows.value) || settingsDefaults.layout.frameRows)));
-    const maxFrameCount = Math.max(1, cols * rows);
-    dom.frameCountToExport.min = "1";
-    dom.frameCountToExport.max = String(maxFrameCount);
-    state.runtime.lastFrameExportCountMax = maxFrameCount;
-  }
   updateSliderReadouts();
 }
 
