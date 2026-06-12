@@ -79,8 +79,8 @@ Version 1.17 • By @GolanLevin, Spring 2026.
 [![10_cyano_kellianderson_i.png](doc/10_cyano_kellianderson_i.png)](demo/10_cyano_kellianderson.png)
 <br>Cyanotype by Kelli Anderson ([@kellianderson](https://www.instagram.com/kellianderson/)) 
 
-![Per-frame mode demo by David Vandenbogaerde (@dxviie, @d17e.dev)](doc/11_per_frame_d17e.gif)
-<br>Per-frame mode demo by David Vandenbogaerde ([@dxviie](https://github.com/dxviie), [@d17e.dev](https://www.instagram.com/d17e.dev/)) — 24 individual photos assembled with the `Per-Frame` alignment pipeline ([load demo](https://golanlevin.github.io/plottimation/?demo=11_per_frame))
+![Metro by David Vandenbogaerde (per-frame mode demo) (@dxviie, @d17e.dev)](doc/11_per_frame_d17e.gif)
+<br>Metro by David Vandenbogaerde ([@dxviie](https://github.com/dxviie), [@d17e.dev](https://www.instagram.com/d17e.dev/))
 
 <!-- 
 
