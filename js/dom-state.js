@@ -8,6 +8,7 @@
  * Preset paper dimensions used only for aspect ratio and UI convenience.
  */
 export const PAPER_PRESETS = {
+  square: { width: 12, height: 12 },
   letter: { width: 11, height: 8.5 },
   legal: { width: 14, height: 8.5 },
   tabloid: { width: 17, height: 11 },

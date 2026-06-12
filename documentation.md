@@ -82,7 +82,7 @@ This is the right mode when you have a folder of individual drawings or photogra
 * `Paper Orientation` –
   Choose `Landscape` or `Portrait`. This changes the effective aspect ratio used by the page warp.
 * `Paper Aspect` –
-  Select a preset paper format such as `Letter`, `Tabloid`, `A4`, `Source`, or `Custom`.
+  Select a preset paper format such as `Square`, `Letter`, `Tabloid`, `A4`, `Source`, or `Custom`.
   * `Source (width:height)` – This option uses the raw source image dimensions as an aspect-ratio hint. This is still just an aspect guide; it does not request a rectified grid or export at that literal pixel size.
   * `Custom` –
   If `Paper Aspect` is set to `Custom`, the `Sheet Width` and `Sheet Height` fields appear. These are used only as aspect-ratio hints.
