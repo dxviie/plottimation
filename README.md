@@ -1,7 +1,7 @@
 # Plottimation Tool
 
 [**This free tool**](https://golanlevin.github.io/plottimation/) builds a looping GIF from a scan or photograph of an animation contact-sheet. It automatically aligns the frames; works both with or without alignment markers; and can even work with casual photographs. You can find the tool [**here**](https://golanlevin.github.io/plottimation/).<br/>
-Version 1.17 • By @GolanLevin, Spring 2026.
+Version 1.18 • By @GolanLevin, Spring 2026.
 
 * [**Plottimation Tool Online Here**](https://golanlevin.github.io/plottimation/)
 * [**Quickstart Instructions**](#quickstart-instructions)

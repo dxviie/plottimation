@@ -7,7 +7,7 @@
  * shared translation block, such as Traditional Chinese or region-specific Portuguese tags.
  */
 
-export const APP_VERSION = "v1.17";
+export const APP_VERSION = "v1.18";
 
 const LOCALES = {
   en: {
