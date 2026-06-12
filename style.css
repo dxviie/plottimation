@@ -98,7 +98,14 @@ select {
   flex-direction: column;
   gap: 16px;
   padding: 22px;
+  overflow-x: hidden;
   overflow-y: auto;
+}
+
+/* Flex column children default to min-width:auto, which lets wide content (e.g. the
+   per-frame thumbnail strip) expand the whole sidebar instead of scrolling locally. */
+.control-panel > .control-group {
+  min-width: 0;
 }
 
 .panel-head {
@@ -1269,6 +1276,8 @@ body.has-loaded-image .output-preview.is-empty,
    --------------------------------------------------------------------------- */
 .per-frame-strip-panel {
   margin-top: 12px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 body:not(.per-frame-pipeline) .per-frame-strip-panel {
@@ -1297,6 +1306,8 @@ body:not(.per-frame-pipeline) .per-frame-strip-panel {
 .per-frame-strip {
   display: flex;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
   overflow-x: auto;
   padding: 4px;
   border: 1px solid var(--line);
